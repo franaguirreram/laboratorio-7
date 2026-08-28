@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.DS_Store
+*.swp
+
+# e545-pi-ftdi-gateway es su propio repo git, publicado por separado en
+# github.com/franaguirreram/e545-pi-ftdi-gateway -- vive físicamente acá
+# adentro por comodidad, pero este repo no lo trackea. Se instala vía
+# pip install desde su URL de GitHub (ver README.md).
+e545-pi-ftdi-gateway/
+
+# entornos virtuales, si alguna vez se crean dentro del repo
+.venv/
+venv/

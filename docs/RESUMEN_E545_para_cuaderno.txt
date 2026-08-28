@@ -1,0 +1,98 @@
+RESUMEN — Conexión y control del E-545/E-517 desde macOS (Laboratorio 7)
+Actualizado: 28/08/2026
+
+
+EL PROBLEMA ORIGINAL
+
+Un script de laboratorio (barrido de un interferómetro de Michelson moviendo una platina piezoeléctrica PI E-545, con electrónica de interfaz E-517) funcionaba en Windows usando pipython, la librería oficial en Python de Physik Instrumente, conectado por USB. Al migrar el trabajo a una Mac (Apple Silicon, arm64), el mismo código dejó de funcionar con el error:
+
+OSError: libpi_pi_gcs2.dylib not found
+
+pipython necesita esa librería nativa para hablar USB con el controlador en macOS. Investigando el instalador oficial descargado de PI ("PI Software Suite", ~2.3 GB), se confirmó que nunca existió una build de esa librería para macOS: el paquete está armado para Windows, con un agregado para Linux x86_64. La única librería nativa GCS2 del paquete es un archivo .so de Linux x86_64 — un formato de binario (ELF) directamente incompatible con macOS (que solo carga Mach-O), sin importar la arquitectura del chip.
+
+Se descartaron varios caminos: emular x86_64 con Rosetta (no serviría, el problema es de formato de binario, no de arquitectura), decompilar el software de PI para portarlo (descartado deliberadamente por motivos de licencia — es reversing de un binario propietario), y usar notebooks en la nube o Web Serial desde el navegador (un notebook remoto no tiene acceso al USB local de la Mac; y el dispositivo no se expone como puerto serie estándar del sistema operativo, así que Web Serial tampoco aplica directo).
+
+
+LA SOLUCIÓN: HABLARLE DIRECTO AL CHIP FTDI
+
+Investigando los descriptores USB reales del dispositivo conectado, se encontró que usa un Vendor ID propio de PI (0x1a72) y Product ID 0x1005, pero con la huella típica de un chip FTDI (interfaz "vendor specific", dos endpoints bulk de 64 bytes, USB 1.1 full-speed) — es decir, un chip FTDI genérico reprogramado con el VID/PID de PI, práctica común en la industria. Esto se confirmó además porque el instalador Linux de PI incluye un paquete llamado específicamente "pi_ftdi_usb".
+
+Con esa pista, se armó un driver propio (llamado pi_ftdi_gateway) que habla dos protocolos, ambos públicos y documentados:
+- El protocolo FTDI estándar (documentado por el fabricante del chip), usando la librería open source pyftdi sobre libusb, para el transporte USB de bajo nivel.
+- El set de comandos ASCII de GCS2, el lenguaje propio de PI para sus controladores (documentado en sus manuales, pensado para que el cliente lo use directamente).
+
+Es importante remarcar que en ningún momento se decompiló ni se copió código del software propietario de PI — todo lo que usa este driver es información pública.
+
+En el camino de armar este driver aparecieron varios hallazgos técnicos concretos: la librería pyftdi tiene un bug real (división por cero) en su cálculo de velocidad de comunicación para este tipo de chip, que hubo que reimplementar corrigiendo ese bug puntual; el controlador no responde si no se activan las señales DTR y RTS antes de escribir; y el controlador espera que cada comando termine en el carácter "retorno de carro" (\r), no alcanza con el salto de línea que arma pipython por defecto.
+
+Un detalle importante de arquitectura: pipython ya tiene pensado un mecanismo para conectarse por vías alternativas a la DLL nativa (así es como funcionan sus conexiones por TCP/IP o por puerto serie), así que el driver propio se pudo enchufar ahí sin tener que tocar ni reescribir el resto de la librería — se sigue usando toda la API de pipython normalmente (SVO, MOV, qPOS, etc.), solo cambia por dónde viajan los bytes.
+
+La primera prueba exitosa fue literalmente mandarle el comando de identificación (*IDN?) y recibir la respuesta real del equipo con su número de serie — confirmando comunicación bidireccional genuina sin ningún software de PI de por medio. Poco después se validó control real: el driver movió físicamente la platina y leyó la posición y el voltaje de vuelta correctamente.
+
+
+EMPAQUETADO DEL DRIVER
+
+El driver se empaquetó como un paquete de Python instalable (pip install -e .), con tests automatizados (usando un chip FTDI simulado, sin necesidad del hardware real para correrlos) que cubren: detección de dispositivos conectados, manejo de errores de conexión, timeouts, y que las respuestas largas del controlador no se corten ni se pierdan. En una revisión más profunda del código (una auditoría pedida explícitamente) se evaluó agregar lógica adicional para leer respuestas grandes y para reintentar comandos fallidos, pero se determinó que esa lógica ya existe, hecha y probada, dentro de la propia librería pipython — agregarla también en el driver hubiera sido trabajo duplicado y un riesgo de que las dos versiones se desincronizaran. En cambio, se hicieron mejoras más puntuales: bajar el tiempo de espera de las lecturas USB de bajo nivel para que no bloqueen por mucho tiempo cuando se pide una respuesta grande con timeout largo, y ampliar cuántos bytes se piden por lectura para necesitar menos viajes de ida y vuelta.
+
+
+VALIDACIÓN CONTRA EL HARDWARE REAL — WAVE GENERATOR Y DATA RECORDER
+
+Con el driver funcionando, se armó un script de diagnóstico (E517_diagnostico.py) que interroga al controlador real y confirma sus capacidades: tiene 3 generadores de forma de onda ("wave generators"), tablas de hasta 8192 puntos cada uno, 3 tablas de grabación de datos ("data recorder"), y un reloj interno de servo de 40 microsegundos (25.000 ciclos por segundo). También se confirmó que casi todos los comandos GCS2 relevantes para wave generator y data recorder están disponibles en pipython.
+
+En el camino de correr este diagnóstico contra el equipo real aparecieron varios errores de uso (no del driver): una función llamada con menos parámetros de los que pide su firma real, el nombre de una función que no existía tal cual se la había escrito, y un problema más sutil e importante: los comandos que leen datos grandes del controlador (como leer la tabla de onda cargada, o leer los datos grabados) son asíncronos — la llamada dispara un proceso en segundo plano que sigue trayendo los datos, y hay que esperar explícitamente a que termine antes de usar el resultado. Si no se espera, no se produce ningún error visible, pero los datos que se terminan usando están mal — un bug silencioso, el tipo más peligroso.
+
+
+EL EXPERIMENTO DE IDA Y VUELTA (E517_ida_vuelta.py)
+
+Se armó un segundo script que ejecuta una trayectoria triangular real (una "ida" y una "vuelta" de 100 nanómetros cada una alrededor de un punto central) usando el wave generator para el movimiento y el data recorder para grabar, simultáneamente, la posición comandada, la posición real medida por el sensor, y el error entre ambas.
+
+Este script tenía varios errores reales, corregidos uno por uno contra el hardware real:
+
+Primero, la forma de cargar la trayectoria en el controlador estaba mal: se intentaba mandar un comando por cada uno de los 200 puntos, con parámetros faltantes que directamente hacían fallar el script. La forma correcta es cargar el array completo de puntos de una sola vez (pipython tiene una función para esto, pensada justamente para este caso).
+
+Segundo, al hacerlo se descubrió empíricamente que el controlador tiene un límite real: un solo comando de carga de datos funciona hasta 72 puntos, y falla (con un error de tiempo agotado) a partir de 73 — casi seguro un límite del tamaño del buffer de línea del controlador. Se ajustó el código para mandar la trayectoria en bloques de 50 puntos en vez de todos juntos.
+
+Tercero, se repitió el mismo bug silencioso del diagnóstico (leer datos asíncronos sin esperar a que terminen) en tres lugares distintos de este script — corregido de la misma forma.
+
+Cuarto, se encontró un bug de la propia librería pipython (no de este proyecto): al crear varias conexiones al controlador dentro del mismo proceso de Python sin cerrarlas de la forma recomendada, quedan callbacks acumulados apuntando a conexiones ya cerradas, lo que produce errores confusos en conexiones nuevas que en realidad están bien. La solución es usar siempre el patrón "with" de Python al conectar, que se asegura de limpiar todo correctamente al terminar.
+
+Quinto — el más importante de todos, porque explicaba por qué el primer gráfico se veía completamente mal —: el reloj al que avanza la tabla de movimiento (un punto cada 25 ciclos de servo, o sea 1 milisegundo por punto) es distinto del reloj al que graba el data recorder (una muestra cada 1 ciclo de servo, o sea 40 microsegundos por muestra). El script pedía de vuelta solo 200 muestras grabadas — la misma cantidad que puntos tiene la trayectoria — pero como el data recorder es 25 veces más rápido, esas 200 muestras solo alcanzan a cubrir el primer 4% del movimiento real, que en total dura 200 milisegundos. Había que pedir 200 × 25 = 5000 muestras para ver la secuencia completa. Corregido y verificado: ahora el gráfico muestra la ida y la vuelta completas, con la posición real llegando efectivamente hasta el pico de 100 nanómetros de excursión.
+
+
+INTERPRETACIÓN FÍSICA DEL RESULTADO
+
+Con los datos ya completos, se interpretó qué muestra el gráfico:
+
+- Al arrancar, la posición comandada da un salto instantáneo (es un valor digital que salta al primer punto de la tabla apenas se dispara el movimiento). La posición real, al ser un sistema físico con inercia, no puede seguir ese salto — tarda unos milisegundos en alcanzarlo, lo que se ve como un pico grande de error al principio que decae rápido (la respuesta típica de cualquier lazo de control ante un escalón).
+
+- Durante el tramo de velocidad constante (la rampa), el error no vuelve a cero sino que se estabiliza en un valor constante (del orden de 50 nanómetros para la velocidad usada en esta prueba). Esto no es un defecto: es una propiedad conocida de cualquier lazo de control real — puede corregir perfectamente un error de posición fija, pero siempre queda un desfasaje constante al seguir algo que se mueve a velocidad constante, proporcional a qué tan rápido se le pide moverse en relación a qué tan rápido puede reaccionar el lazo.
+
+- En el pico de la trayectoria (donde la velocidad cambia de dirección instantáneamente, formando una esquina filosa), la posición real nunca llega a tocar el pico exacto y lo redondea — ningún sistema físico real puede seguir un cambio de velocidad instantáneo, que matemáticamente pide aceleración infinita.
+
+- Se notó además que el desfasaje no es igual en la ida que en la vuelta. Dos explicaciones posibles: que la ida arranca justo después del salto inicial (con el transitorio del escalón todavía fresco encima), mientras la vuelta ya arranca en movimiento; o histéresis mecánica propia del actuador piezoeléctrico, que responde distinto según la dirección de movimiento incluso con el lazo de posición cerrado.
+
+Para separar estas dos causas, se modificó el script: en vez de arrancar el movimiento desde el centro del rango (lo que generaba el salto grande de golpe), ahora primero se mueve la platina hasta el punto exacto donde arranca la trayectoria, se espera a que llegue, y se agrega una pausa extra de asentamiento — recién ahí se dispara la secuencia de wave generator. La idea es que el sistema ya esté quieto y estabilizado antes de empezar a moverse, sin ningún escalón artificial de por medio, para que la comparación entre ida y vuelta sea más limpia. Queda pendiente correr esta versión y comparar.
+
+
+PRÓXIMO TEMA EN EXPLORACIÓN: RAMPAS CON ACELERACIÓN SUAVE
+
+Para mejorar la precisión del seguimiento durante todo el barrido (no solo evitar el escalón inicial, sino redondear también la esquina filosa del pico), se identificaron dos caminos posibles:
+
+Uno es usar un parámetro que ya tiene el propio comando de carga de rampa del controlador (WAV_LIN), que permite indicarle cuántos puntos al principio y al final de cada tramo recto usar para acelerar y frenar suavemente, en vez de ir a velocidad constante de punta a punta — el controlador mismo calcula esa curva. Es la opción más simple de probar.
+
+El otro es calcular la trayectoria completa en la computadora, con fórmulas explícitas de aceleración constante / velocidad constante / desaceleración (como ya existe, hecho para otro propósito, en un archivo llamado trajectories.py encontrado en la carpeta de Descargas), y cargar ese array ya calculado en el controlador. Da control matemático exacto sobre la aceleración usada (útil para reportarla en el informe) pero es más trabajo de implementación.
+
+Todavía no se decidió ni implementó ninguno de los dos — es el próximo paso a definir.
+
+
+ARCHIVOS RELEVANTES (en la Mac)
+
+- Carpeta de trabajo del experimento: Desktop/LABORATORIO 7/
+  - E517_diagnostico.py — diagnóstico del controlador
+  - E517_ida_vuelta.py — experimento de wave generator + data recorder
+  - RESUMEN_conexion_E545_macOS.md — resumen de la primera etapa (conexión)
+
+- Carpeta preparada para subir a GitHub: Desktop/LABORATORIO 7/e545-pi-ftdi-gateway/
+  - Contiene el driver, sus tests, documentación técnica completa, y una copia de los scripts de laboratorio — lista para inicializar como repositorio, todavía no publicada.
+
+- Entorno de Python usado: ~/python-envs/pi (Python 3.14, específico para este trabajo, con todas las librerías necesarias ya instaladas).
