@@ -1,0 +1,9 @@
+E517_repetibilidad.py -- 20260828_163211
+RANGO_MIN=0.0 RANGO_MAX=200.0
+N_REPS=5 N_LEG=100 WTR=1000 RTR_VAL=25 SPEEDUPDOWN=20
+VEL_MOV=1000.0
+tiempos_A_ciclo_ms=[8053.1, 8055.7, 8032.6, 8045.7, 8051.7]
+tiempos_B_ida_ms=[4041.5, 4029.7, 4025.9, 4022.7, 4041.2]
+tiempos_B_vuelta_ms=[120.1, 124.5, 125.1, 124.7, 122.7]
+posfinal_A_um=[0.0277, 0.027, 0.0252, 0.0232, 0.0237]
+posfinal_B_um=[-0.0278, -0.0159, -0.0147, -0.0113, -0.0261]
