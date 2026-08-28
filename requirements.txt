@@ -1,0 +1,5 @@
+numpy
+pandas
+matplotlib
+pipython
+pi-ftdi-gateway @ git+https://github.com/franaguirreram/e545-pi-ftdi-gateway.git
