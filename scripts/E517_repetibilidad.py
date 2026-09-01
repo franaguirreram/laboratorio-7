@@ -1,34 +1,65 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-E-517 / E-545 — Test de repetibilidad: WAV_RAMP (WGC) vs WAV_LIN + MOV
+E-517 / E-545 — Repetibilidad, comparando distintas velocidades (VEL)
 
-Compara dos formas de repetir un desplazamiento de RANGO COMPLETO
-(0 -> 200 µm, el rango físico del eje A según qTMN/qTMX medidos en
-E517_diagnostico.py) N_REPS veces:
+Adaptación de tu script de repetibilidad de Labo 6 (el que guardaba en
+C:/Users/NANOFISICA_07/.../MEDICIONES/... con paths fijos de Windows) al
+mismo formato que E517_step_response.py y E517_ida_vuelta_speedupdown.py:
+conexión PIFtdiGateway, guardado en datos/raw + datos/metadata con
+timestamp, gráficos en el mismo estilo.
 
-  A) WAV_RAMP: un ciclo completo (ida+vuelta) por wave generator, con
-     speedupdown para suavizar los extremos, repetido N_REPS veces
-     (una llamada a WGO por repetición, cada vez leyendo el ciclo
-     completo grabado por el data recorder).
-  B) WAV_LIN: solo la ida (0->200) por wave generator (con speedupdown),
-     y la vuelta (200->0) con un MOV normal (sin wave table), también
-     repetido N_REPS veces.
+Se agrega respecto al original: un barrido sobre una LISTA de velocidades
+(VEL) en vez de una sola velocidad fija, para poder comparar la
+repetibilidad de "antes" (la velocidad que usaban en Labo 6) contra las
+velocidades que están usando ahora en los ensayos de dwell time / wave
+table.
 
-Hipótesis a probar (usuario, 2026-08-28): un MOV directo, sin pasar por
-la wave table, podría ser más rápido que la rampa de muchos puntos. Este
-script mide el tiempo real de cada tramo en ambos métodos para comparar,
-y además compara la repetibilidad: qué tan consistente es la posición
-final entre repeticiones, en cada método.
+CONVENCIONES DE TRAZABILIDAD:
+    [MEDIDO]      verificado en tus scripts o en los manuales del proyecto
+    [INFERENCIA]  interpretación razonable, no verificada explícitamente
+    [VERIFICAR]   confirmalo vos antes de correr en el equipo
+    [PENDIENTE]   parámetro que falta completar
 
-[PENDIENTE] Primera vez que se prueba el rango físico completo (200 µm)
--- todo el trabajo anterior fue a escala de cientos de nm. WTR/velocidad
-acá son un primer intento conservador (~50 µm/s), no algo optimizado.
-Si el error de tracking sale muy grande o el movimiento se ve raro,
-bajar la velocidad (subir WTR) antes de sacar conclusiones.
+------------------------------------------------------------------------
+QUÉ CAMBIÉ RESPECTO A TU SCRIPT ORIGINAL:
+------------------------------------------------------------------------
+1. Guardado: reemplacé los paths fijos de Windows por la misma estructura
+   datos/raw, datos/metadata, resultados/figuras que usan tus otros dos
+   scripts, con nombre de archivo con timestamp (así todas las corridas
+   quedan juntas ahí, distinguidas por prefijo + timestamp, igual que
+   charlamos para el de step response).
+2. Agregué VELOCIDADES (lista) en vez de una VEL fija, y una columna
+   "vel[um/s]" en los datos crudos, para poder comparar entre ellas.
+3. Agregué un panel extra al gráfico: repetibilidad (std) en función de
+   la velocidad, que es literalmente lo que pediste comparar.
+4. Guardo un archivo de metadata .txt con los parámetros de la corrida,
+   igual que en los otros dos scripts (tu original no lo hacía).
+5. NO toqué la lógica de medición en sí (mov_raw, medir_repetibilidad,
+   los sleeps de 0.0015*dist+0.07): la dejé tal cual la tenías, porque
+   evidentemente ya la validaste con hardware real y no tengo motivo
+   para tocarla. Sí renombré/reordené código para que quede en el mismo
+   estilo que los otros dos scripts (secciones con # %%).
 
-Uso en Spyder: apuntar el intérprete a ~/python-envs/pi/bin/python3.14,
-correr por celdas (#%%) con Ctrl+Enter.
+[VERIFICAR] Unidades de VEL: el manual GCS-3.0 solo dice "Velocity of
+    the axis in physical units" (SM160E, comando VEL, p.99) sin dar el
+    número concreto -- asumo que son las unidades de posición del eje
+    por segundo (µm/s acá), coherente con que target_pos está en µm.
+    No encontré en los PDFs del proyecto una tabla que lo confirme en
+    unidades explícitas -- si tenés dudas, corré VEL? después de setear
+    y comparalo con el tiempo real que tarda un MOV de distancia
+    conocida.
+
+[VERIFICAR] mov_raw() manda el comando MOV crudo por pidevice.send(),
+    saltando el chequeo de error automático de pipython -- así estaba en
+    tu script original (con el comentario de que evita un timeout). Lo
+    dejé igual, pero tené en cuenta que si el controlador devuelve un
+    error real (target fuera de rango, etc.) NO te vas a enterar acá, a
+    diferencia de si usaras pidevice.MOV() directamente.
+
+wait_my() estaba en tu script original pero nunca se llamaba (usan
+sleeps fijos en vez de esperar ONT real) -- la dejo tal cual, sin
+llamarla, por si la querés usar para debuggear a mano.
 """
 
 # %% -- Imports --------------------------------------------------
@@ -49,255 +80,213 @@ for _dir in (DATOS_RAW, DATOS_METADATA, RESULTADOS_FIGURAS):
     _dir.mkdir(parents=True, exist_ok=True)
 
 
-# %% -- Parámetros ------------------------------------------------
-RANGO_MIN, RANGO_MAX = 0.0, 200.0   # [MEDIDO — qTMN/qTMX, E517_diagnostico.py]
-T_SERVO_US = 40.0                   # [MEDIDO — SPA 0x0E000200]
+# %% -- Parámetros del experimento -------------------------------
+AXIS = 'B'
+CHANNEL = 2
 
-N_REPS = 5        # [ELEGIDO] repeticiones por método; subir una vez visto el timing real
+START = 200.0
+END = 0.0
+N_POS = 100
+N_REPS = 30
 
-N_LEG  = 100       # puntos de wave table para UN tramo (0->200 o 200->0)
-WTR    = 1000      # [ELEGIDO] 1000 × 40µs = 40 ms/punto → ida sola en 4 s (~50 µm/s)
-SPEEDUPDOWN = N_LEG // 5   # 20%, mismo criterio que E517_ida_vuelta_speedupdown.py
+# [PENDIENTE] Completá con las velocidades que querés comparar. Dejé
+# 100 (la que usaba tu script original de Labo 6) como primer elemento
+# para tener el punto de referencia "antes"; agregá las velocidades
+# "de ahora" que quieras comparar.
+VELOCIDADES = [100.0]  # um/s [VERIFICAR unidades, ver docstring]
 
-# RTR: hay que quedar por debajo de 8192 muestras grabadas por lectura.
-# ciclo completo (A) = 2*N_LEG puntos de wave; tramo simple (B) = N_LEG.
-RTR_VAL = 25       # [ELEGIDO] con esto: ciclo completo A = 8000 muestras (< 8192)
+HOME = START
+TARGET_POS = np.linspace(START, END, N_POS + 1)
 
-VEL_MOV = 1000.0   # [ELEGIDO] alta a propósito — no le imponemos un techo de
-                    # velocidad al MOV de la opción B, para que compita a su
-                    # velocidad "natural" contra la rampa de la opción A.
+PRE_MOV_WAIT = 0.1    # s  (definido en tu original, no se usaba -- lo dejo)
+QUERY_WAIT = 0.06     # s  (idem)
+ONTARGET_TOUT = 10.0  # s  (idem)
 
-TABLA_X = WGEN_X = 1
-AXIS_X  = 'A'
-
-n_leer_leg   = N_LEG * WTR // RTR_VAL
-n_leer_ciclo = 2 * N_LEG * WTR // RTR_VAL
-assert n_leer_ciclo <= 8192, "Ajustar RTR_VAL: el ciclo completo se pasa del límite de 8192 muestras"
-
-print(f"[timing estimado] ida sola ≈ {N_LEG*WTR*T_SERVO_US/1000:.0f} ms, "
-      f"ciclo completo ≈ {2*N_LEG*WTR*T_SERVO_US/1000:.0f} ms")
-print(f"[muestras por lectura] tramo={n_leer_leg}, ciclo={n_leer_ciclo} (límite 8192)")
+print(f"[config] eje={AXIS}, N_POS={N_POS}, N_REPS={N_REPS}, "
+      f"velocidades a comparar={VELOCIDADES}")
 
 
-# %% -- Conexión y estado inicial --------------------------------
-pidevice = GCSDevice('E-517', gateway=PIFtdiGateway())
-print(f"[conexión] {pidevice.qIDN().strip()}")
-
-pidevice.ONL([1, 2, 3], [1, 1, 1])
-pidevice.SVO([AXIS_X], [True])
-pidevice.DCO([AXIS_X], [False])
-pidevice.VCO([AXIS_X], [False])
-pidevice.VEL([AXIS_X], [VEL_MOV])
-
-
-# %% -- Helpers ----------------------------------------------------
-def _leer_array_gcs(pidevice, timeout=15.0):
-    """qGWD/qDRR son asíncronos -- ver E517_ida_vuelta.py para el detalle."""
+# %% -- Helpers (idénticos a tu script original) -------------------
+def wait_my(pidevice, axes, timeout=10):
+    """Sin usar en el flujo principal -- queda para debug manual."""
     t0 = time.time()
-    while pidevice.bufstate is not True:
-        if time.time() - t0 > timeout:
-            raise TimeoutError("bufstate no llegó a True")
-        time.sleep(0.005)
-    return np.array(pidevice.bufdata[0])
+    while time.time() - t0 < timeout:
+        pos = pidevice.qPOS()[AXIS]
+        ont = pidevice.qONT()[AXIS]
+        moving = pidevice.IsMoving()[AXIS]
+        print(f"POS={pos:8.3f}  ONT={ont}  MOV={moving}")
+        if ont:
+            return
+        time.sleep(0.1)
+    raise TimeoutError("No llegó al target")
 
 
-def _ir_y_asentar(pidevice, pos, t_asentamiento=0.3):
-    pidevice.MOV([AXIS_X], [pos])
-    pitools.waitontarget(pidevice, [AXIS_X], timeout=15)
-    time.sleep(t_asentamiento)
+def mov_raw(pidevice, axis, position):
+    """
+    Envía el comando MOV como cadena GCS cruda, evitando el ciclo
+    automático ERR? de pipython que producía el timeout. [MEDIDO, de tu
+    script original]
+    """
+    cmd = f"MOV {axis} {position:.6f}\n"
+    pidevice.send(cmd)
 
 
-# %% -- Opción A: WAV_RAMP repetido (ida+vuelta por ciclo) --------
-print("\n=== Opción A: WAV_RAMP ===")
-_ir_y_asentar(pidevice, RANGO_MIN)
+def medir_repetibilidad(pidevice, axis, home, targets, n_reps):
+    """Idéntica a tu función original."""
+    data = []
+    for target in targets:
+        for rep in range(n_reps):
+            mov_raw(pidevice, axis, home)
+            dist = abs(home - target)
+            time.sleep(0.0015 * dist + 0.07)
 
-pidevice.WCL(TABLA_X)
-pidevice.WAV_RAMP(
-    table=TABLA_X, firstpoint=1, numpoints=2 * N_LEG, append='X',
-    center=N_LEG, speedupdown=SPEEDUPDOWN,
-    amplitude=(RANGO_MAX - RANGO_MIN), offset=RANGO_MIN, seglength=2 * N_LEG,
+            mov_raw(pidevice, axis, target)
+            time.sleep(0.0015 * dist + 0.07)
+
+            qpos = pidevice.qPOS()[axis]
+            data.append([target, rep, qpos])
+    return data
+
+
+# %% -- Medición: barrido sobre VELOCIDADES ------------------------
+raw_data = []
+
+try:
+    with GCSDevice('E-517', gateway=PIFtdiGateway()) as pidevice:
+        print(f"[conexión] {pidevice.qIDN().strip()}")
+
+        pidevice.ONL([CHANNEL], [True])
+        pidevice.SVO(AXIS, True)
+
+        for vel in VELOCIDADES:
+            pidevice.VEL(AXIS, vel)
+            print(f"[medición] vel={vel} um/s -- comenzando...")
+
+            data_vel = medir_repetibilidad(
+                pidevice, AXIS, HOME, TARGET_POS, N_REPS
+            )
+            for fila in data_vel:
+                raw_data.append([vel] + fila)
+
+            print(f"[medición] vel={vel} um/s -- terminada.")
+
+    print("[medición] Todas las velocidades terminadas.")
+
+except Exception as e:
+    print(f"❌ Error durante la medición: {e}")
+    raise
+
+
+# %% -- Armar DataFrames y resumen ---------------------------------
+df_raw = pd.DataFrame(
+    raw_data,
+    columns=["vel[um/s]", "target_pos[um]", "rep", "qpos[um]"],
 )
-pidevice.WTR(WGEN_X, WTR, 0)
-pidevice.WGC(WGEN_X, 1)
-pidevice.WOS(WGEN_X, 0.0)
-pidevice.DRC(tables=[1, 2, 3], sources=[AXIS_X, AXIS_X, AXIS_X], options=[1, 2, 3])
-pidevice.RTR(RTR_VAL)
 
-datos_A = []
-tiempos_A = []
-posfinal_A = []
-for rep in range(N_REPS):
-    t0 = time.time()
-    pidevice.WGO(WGEN_X, 1)
-    pitools.waitonwavegen(pidevice, wavegens=WGEN_X, timeout=15)
-    pidevice.WGO(WGEN_X, 0)
-    dt = time.time() - t0
-    tiempos_A.append(dt)
-
-    pidevice.qDRR(1, 1, n_leer_ciclo)
-    target = _leer_array_gcs(pidevice)
-    pidevice.qDRR(2, 1, n_leer_ciclo)
-    current = _leer_array_gcs(pidevice)
-    pidevice.qDRR(3, 1, n_leer_ciclo)
-    error = _leer_array_gcs(pidevice)
-    t_ms = np.arange(len(current)) * (RTR_VAL * T_SERVO_US / 1000)
-
-    pos_final = pidevice.qPOS(AXIS_X)[AXIS_X]
-    posfinal_A.append(pos_final)
-    print(f"  [A] rep {rep+1}/{N_REPS}: {dt*1000:.1f} ms, pos_final={pos_final:.4f} µm")
-
-    for tt, ta, cu, er in zip(t_ms, target, current, error):
-        datos_A.append({'rep': rep, 't_ms': tt, 'target_um': ta, 'current_um': cu, 'error_um': er})
-
-    time.sleep(0.2)  # el ciclo ya vuelve solo a RANGO_MIN; solo un respiro antes de la próxima
-
-df_A = pd.DataFrame(datos_A)
-
-
-# %% -- Opción B: WAV_LIN (ida) + MOV (vuelta) ---------------------
-print("\n=== Opción B: WAV_LIN + MOV ===")
-_ir_y_asentar(pidevice, RANGO_MIN)
-
-pidevice.WCL(TABLA_X)
-pidevice.WAV_LIN(
-    table=TABLA_X, firstpoint=1, numpoints=N_LEG, append='X',
-    speedupdown=SPEEDUPDOWN, amplitude=(RANGO_MAX - RANGO_MIN),
-    offset=RANGO_MIN, seglength=N_LEG,
+resumen = (
+    df_raw
+    .groupby(["vel[um/s]", "target_pos[um]"])["qpos[um]"]
+    .agg(media="mean", std="std", n="count")
+    .reset_index()
 )
-pidevice.WTR(WGEN_X, WTR, 0)
-pidevice.WGC(WGEN_X, 1)
-pidevice.WOS(WGEN_X, 0.0)
-pidevice.DRC(tables=[1, 2, 3], sources=[AXIS_X, AXIS_X, AXIS_X], options=[1, 2, 3])
-pidevice.RTR(RTR_VAL)
+resumen["sem[um]"] = resumen["std"] / np.sqrt(resumen["n"])
+resumen["offset[um]"] = resumen["media"] - resumen["target_pos[um]"]
 
-datos_B = []
-tiempos_B_ida = []
-tiempos_B_vuelta = []
-posfinal_B = []
-for rep in range(N_REPS):
-    # -- ida: WAV_LIN --
-    t0 = time.time()
-    pidevice.WGO(WGEN_X, 1)
-    pitools.waitonwavegen(pidevice, wavegens=WGEN_X, timeout=15)
-    pidevice.WGO(WGEN_X, 0)
-    dt_ida = time.time() - t0
-    tiempos_B_ida.append(dt_ida)
+# repetibilidad promedio por velocidad (lo que querés comparar)
+repetibilidad_por_vel = (
+    resumen
+    .groupby("vel[um/s]")["std"]
+    .agg(std_medio="mean", std_max="max")
+    .reset_index()
+)
+repetibilidad_por_vel["std_medio[nm]"] = repetibilidad_por_vel["std_medio"] * 1000
+repetibilidad_por_vel["std_max[nm]"] = repetibilidad_por_vel["std_max"] * 1000
 
-    pidevice.qDRR(1, 1, n_leer_leg)
-    target = _leer_array_gcs(pidevice)
-    pidevice.qDRR(2, 1, n_leer_leg)
-    current = _leer_array_gcs(pidevice)
-    pidevice.qDRR(3, 1, n_leer_leg)
-    error = _leer_array_gcs(pidevice)
-    t_ms = np.arange(len(current)) * (RTR_VAL * T_SERVO_US / 1000)
-    for tt, ta, cu, er in zip(t_ms, target, current, error):
-        datos_B.append({'rep': rep, 'tramo': 'ida', 't_ms': tt,
-                         'target_um': ta, 'current_um': cu, 'error_um': er})
-
-    # -- vuelta: MOV directo, sin wave table --
-    t0 = time.time()
-    pidevice.MOV([AXIS_X], [RANGO_MIN])
-    pitools.waitontarget(pidevice, [AXIS_X], timeout=15)
-    dt_vuelta = time.time() - t0
-    tiempos_B_vuelta.append(dt_vuelta)
-
-    pos_final = pidevice.qPOS(AXIS_X)[AXIS_X]
-    posfinal_B.append(pos_final)
-    print(f"  [B] rep {rep+1}/{N_REPS}: ida={dt_ida*1000:.1f} ms, "
-          f"vuelta={dt_vuelta*1000:.1f} ms, pos_final={pos_final:.4f} µm")
-
-    time.sleep(0.2)
-
-df_B = pd.DataFrame(datos_B)
+print(resumen)
+print("\n[repetibilidad por velocidad]")
+print(repetibilidad_por_vel[["vel[um/s]", "std_medio[nm]", "std_max[nm]"]])
 
 
-# %% -- Comparación numérica ----------------------------------------
-tA = np.array(tiempos_A)
-tB_total = np.array(tiempos_B_ida) + np.array(tiempos_B_vuelta)
-
-print("\n=== Comparación ===")
-print(f"[A: WAV_RAMP]    ciclo completo: {tA.mean()*1000:.1f} ± {tA.std()*1000:.1f} ms")
-print(f"[B: WAV_LIN+MOV] ida+vuelta:     {tB_total.mean()*1000:.1f} ± {tB_total.std()*1000:.1f} ms "
-      f"(ida {np.mean(tiempos_B_ida)*1000:.1f} ms + vuelta {np.mean(tiempos_B_vuelta)*1000:.1f} ms)")
-print(f"[repetibilidad A] std posición final: {np.std(posfinal_A)*1000:.2f} nm")
-print(f"[repetibilidad B] std posición final: {np.std(posfinal_B)*1000:.2f} nm")
-
-
-# %% -- Guardar los datos crudos ------------------------------------
+# %% -- Guardar --------------------------------------------------
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 nombre_base = f"E517_repetibilidad_{timestamp}"
 
-df_A.to_csv(DATOS_RAW / f"{nombre_base}_A_wavramp.csv", index=False)
-df_B.to_csv(DATOS_RAW / f"{nombre_base}_B_wavlin_mov.csv", index=False)
+df_raw.to_csv(DATOS_RAW / f"{nombre_base}.csv", index=False)
+resumen.to_csv(DATOS_RAW / f"{nombre_base}_resumen.csv", index=False)
 
 with open(DATOS_METADATA / f"{nombre_base}_metadata.txt", 'w') as f:
     f.write(f"E517_repetibilidad.py -- {timestamp}\n")
-    f.write(f"RANGO_MIN={RANGO_MIN} RANGO_MAX={RANGO_MAX}\n")
-    f.write(f"N_REPS={N_REPS} N_LEG={N_LEG} WTR={WTR} RTR_VAL={RTR_VAL} SPEEDUPDOWN={SPEEDUPDOWN}\n")
-    f.write(f"VEL_MOV={VEL_MOV}\n")
-    f.write(f"tiempos_A_ciclo_ms={[round(x*1000,1) for x in tiempos_A]}\n")
-    f.write(f"tiempos_B_ida_ms={[round(x*1000,1) for x in tiempos_B_ida]}\n")
-    f.write(f"tiempos_B_vuelta_ms={[round(x*1000,1) for x in tiempos_B_vuelta]}\n")
-    f.write(f"posfinal_A_um={posfinal_A}\n")
-    f.write(f"posfinal_B_um={posfinal_B}\n")
+    f.write(f"AXIS={AXIS} CHANNEL={CHANNEL}\n")
+    f.write(f"START={START} END={END} N_POS={N_POS} N_REPS={N_REPS}\n")
+    f.write(f"VELOCIDADES={VELOCIDADES}\n")
+    f.write("\nrepetibilidad_por_vel:\n")
+    f.write(repetibilidad_por_vel.to_string(index=False))
+    f.write("\n")
 
-print(f"\n[guardado] {nombre_base}_A_wavramp.csv + _B_wavlin_mov.csv + _metadata.txt")
-
-
-# %% -- Volver al origen y cerrar ------------------------------------
-_ir_y_asentar(pidevice, RANGO_MIN, t_asentamiento=0)
-print(f"[cierre] posición final {dict(pidevice.qPOS())}")
-cleanup_gcsdevice(pidevice)
+print(f"[guardado] {nombre_base}.csv + {nombre_base}_resumen.csv + "
+      f"{nombre_base}_metadata.txt")
 
 
 # %% -- Gráficos --------------------------------------------
 plt.rcParams.update({
-    'font.family':   'serif',
-    'font.size':     12,
+    'font.family': 'serif',
+    'font.size': 12,
     'axes.labelsize': 14,
     'xtick.labelsize': 12,
     'ytick.labelsize': 12,
-    'figure.dpi':    120,
+    'figure.dpi': 120,
 })
 
-fig, axes = plt.subplots(2, 2, figsize=(11, 7))
+colores = plt.cm.tab10(np.linspace(0, 1, len(VELOCIDADES)))
 
-# Repetibilidad A: todas las repeticiones superpuestas
-for rep in range(N_REPS):
-    sub = df_A[df_A['rep'] == rep]
-    axes[0, 0].plot(sub['t_ms'], sub['current_um'], lw=0.7, alpha=0.7)
-axes[0, 0].set_title('A) WAV_RAMP — repeticiones superpuestas')
-axes[0, 0].set_xlabel('t [ms]')
-axes[0, 0].set_ylabel('posición real [µm]')
+fig, ax = plt.subplots(3, 1, figsize=(6, 9))
 
-# Repetibilidad B (solo la ida, tramo WAV_LIN): todas las repeticiones superpuestas
-for rep in range(N_REPS):
-    sub = df_B[(df_B['rep'] == rep) & (df_B['tramo'] == 'ida')]
-    axes[0, 1].plot(sub['t_ms'], sub['current_um'], lw=0.7, alpha=0.7)
-axes[0, 1].set_title('B) WAV_LIN (ida) — repeticiones superpuestas')
-axes[0, 1].set_xlabel('t [ms]')
-axes[0, 1].set_ylabel('posición real [µm]')
+# Panel 1: posición medida vs enviada, por velocidad
+for vel, color in zip(VELOCIDADES, colores):
+    sub = resumen[resumen["vel[um/s]"] == vel]
+    ax[0].errorbar(
+        sub["target_pos[um]"], sub["media"], yerr=sub["sem[um]"],
+        fmt=".", capsize=3, color=color, label=f"vel={vel:g} um/s",
+    )
+lims = [resumen["target_pos[um]"].min(), resumen["target_pos[um]"].max()]
+ax[0].plot(lims, lims, color="black", ls="--", lw=0.8, label="esperado")
+ax[0].legend(fontsize=8)
+ax[0].set_xlabel("Posición enviada [µm]")
+ax[0].set_ylabel("Posición autosensada [µm]")
+ax[0].grid()
 
-# Comparación de tiempos
-axes[1, 0].bar(['A: WAV_RAMP\n(ciclo)', 'B: WAV_LIN+MOV\n(ida+vuelta)'],
-                [tA.mean() * 1000, tB_total.mean() * 1000],
-                yerr=[tA.std() * 1000, tB_total.std() * 1000],
-                color=['#1f77b4', '#d62728'], capsize=5)
-axes[1, 0].set_ylabel('duración por repetición [ms]')
-axes[1, 0].set_title('Tiempo total por repetición')
+# Panel 2: offset respecto de la posición enviada, por velocidad
+for vel, color in zip(VELOCIDADES, colores):
+    sub = resumen[resumen["vel[um/s]"] == vel]
+    ax[1].errorbar(
+        sub["target_pos[um]"], sub["offset[um]"], yerr=sub["sem[um]"],
+        fmt=".", capsize=3, color=color, label=f"vel={vel:g} um/s",
+    )
+ax[1].axhline(0, color="black", ls="--", lw=0.8)
+ax[1].set_xlabel("Posición enviada [µm]")
+ax[1].set_ylabel("Diferencia de posición [µm]")
+ax[1].legend(fontsize=8)
+ax[1].grid()
 
-# Repetibilidad de la posición final
-axes[1, 1].scatter(range(N_REPS), (np.array(posfinal_A) - RANGO_MIN) * 1000,
-                    label=f'A (std={np.std(posfinal_A)*1000:.1f} nm)', color='#1f77b4')
-axes[1, 1].scatter(range(N_REPS), (np.array(posfinal_B) - RANGO_MIN) * 1000,
-                    label=f'B (std={np.std(posfinal_B)*1000:.1f} nm)', color='#d62728')
-axes[1, 1].set_xlabel('repetición #')
-axes[1, 1].set_ylabel('posición final − RANGO_MIN [nm]')
-axes[1, 1].set_title('Repetibilidad de la posición final')
-axes[1, 1].legend(frameon=False, fontsize=9)
+# Panel 3: repetibilidad (std) en función de la velocidad -- la comparación pedida
+ax[2].scatter(
+    repetibilidad_por_vel["vel[um/s]"],
+    repetibilidad_por_vel["std_medio[nm]"],
+    color="tab:blue", label="std medio (todas las posiciones)",
+)
+ax[2].scatter(
+    repetibilidad_por_vel["vel[um/s]"],
+    repetibilidad_por_vel["std_max[nm]"],
+    color="tab:red", marker="x", label="std máximo",
+)
+ax[2].set_xlabel("Velocidad [µm/s]")
+ax[2].set_ylabel("Repetibilidad (std) [nm]")
+ax[2].legend(fontsize=8)
+ax[2].grid()
 
 plt.tight_layout()
 plt.savefig(RESULTADOS_FIGURAS / f"{nombre_base}.pdf", bbox_inches='tight', dpi=200)
+plt.savefig(RESULTADOS_FIGURAS / f"{nombre_base}.png", bbox_inches='tight', dpi=200)
 plt.show()
 
-print(f"\n[fin] gráfico guardado como {nombre_base}.pdf")
+print(f"\n[fin] gráfico guardado como {nombre_base}.pdf/.png")

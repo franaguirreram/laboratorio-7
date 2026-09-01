@@ -58,20 +58,20 @@ for _dir in (DATOS_RAW, DATOS_METADATA, RESULTADOS_FIGURAS):
 # %% -- Parámetros del experimento -------------------------------
 CENTRO_X    = 100.0   # µm, centro del scan
 CENTRO_Y    = 100.0   # µm, Y queda quieto acá
-AMPLITUD    = 0.5     # µm, semi-amplitud (igual que la corrida sin suavizar, para comparar)
+AMPLITUD    = 1     # µm, semi-amplitud (igual que la corrida sin suavizar, para comparar)
 
-T_SERVO_US  = 40.0    # [MEDIDO — E517_diagnostico.py, SPA 0x0E000200]
-WTR         = 25      # ciclos de servo por punto → 1 ms/punto
+T_SERVO_US  = 10.0    # [MEDIDO — E517_diagnostico.py, SPA 0x0E000200]
+WTR         = 20      # ciclos de servo por punto → 1 ms/punto
 DWELL_US    = T_SERVO_US * WTR
 
-N_IDA       = 100
-N_VUELTA    = 100
+N_IDA       = 200
+N_VUELTA    = 200
 N_TOTAL     = N_IDA + N_VUELTA
 DURACION_MS = N_TOTAL * DWELL_US / 1000
 
 # [ELEGIDO — primer valor a probar] puntos de aceleración/desaceleración
 # en cada extremo de cada segmento, como fracción de sus puntos totales.
-SPEEDUPDOWN = N_IDA // 5   # 20% -> 20 puntos de 100
+SPEEDUPDOWN = N_IDA // 5 #25% con 4   # 20% -> 20 puntos de 100
 
 print(f"[timing] dwell/punto = {DWELL_US:.0f} µs, N_total = {N_TOTAL}, "
       f"duración = {DURACION_MS:.2f} ms, speedupdown = {SPEEDUPDOWN}")
@@ -90,7 +90,7 @@ pidevice.SVO(['A', 'B'], [True, True])
 
 # Mismo criterio que E517_ida_vuelta.py: sin compensación de deriva ni
 # control de velocidad activo durante el wave generator.
-pidevice.DCO(['A', 'B'], [False, False])
+pidevice.DCO(['A', 'B'], [True, True])
 print(pidevice.qDCO())
 pidevice.VCO(['A', 'B'], [False, False])
 print(pidevice.qVCO())
@@ -245,12 +245,13 @@ plt.rcParams.update({
     'figure.dpi':    120,
 })
 
-fig, axes = plt.subplots(3, 1, figsize=(6.5, 6), sharex=True)
+fig, axes = plt.subplots(3, 1, figsize=(6.5, 6), sharex=False)
 
 axes[0].plot(t_ms, (target  - CENTRO_X) * 1000, color='#1f77b4', lw=1.2, label='comandada')
 axes[0].plot(t_ms, (current - CENTRO_X) * 1000, color='#d62728', lw=0.9, label='real')
 axes[0].set_ylabel(r'$x - x_c$ [nm]')
 axes[0].legend(frameon=False, loc='upper right')
+#axes[0].set_xlim(0,0.1)
 
 axes[1].plot(t_ms, error * 1000, color='k', lw=0.8)
 axes[1].axhline(0, color='gray', lw=0.5, ls='--')
@@ -266,7 +267,7 @@ axes[2].set_aspect('equal')
 
 axes[1].set_xlabel('t [ms]')
 plt.tight_layout()
-plt.savefig(RESULTADOS_FIGURAS / f"{nombre_base}.pdf", bbox_inches='tight', dpi=200)
+plt.savefig(RESULTADOS_FIGURAS / f"{nombre_base}_DCO.pdf", bbox_inches='tight', dpi=200)
 plt.show()
 
 print(f"\n[fin] gráfico guardado como {nombre_base}.pdf")
