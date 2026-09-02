@@ -1,0 +1,11 @@
+E517_step_response.py -- 20260902_192148
+CENTRO_X=100.0 CENTRO_Y=100.0 AMPLITUD_ESCALON=0.1
+pos_inicial=99.9 pos_final=100.1
+T_SERVO_US=40.0 WTR=1 RTR_VAL=1
+N_PRE=50 N_POST=2000 N_TOTAL=2050
+T_ASENTAMIENTO_S=0.5
+n_leer=2050 muestras_leidas=2050
+t_escalon_ms=2.0000
+error_max_nm=201.200
+error_rms_nm=67.040
+settling_time_ms_band5nm=39.8400

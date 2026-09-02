@@ -72,7 +72,7 @@ for _dir in (DATOS_RAW, DATOS_METADATA, RESULTADOS_FIGURAS):
 CENTRO_X = 100.0        # µm, punto de referencia  [PENDIENTE: ajustar]
 CENTRO_Y = 100.0        # µm, Y queda quieto
 
-AMPLITUD_ESCALON = 100  # µm, tamaño del escalón (semi-amplitud, igual
+AMPLITUD_ESCALON = .1  # µm, tamaño del escalón (semi-amplitud, igual
                          # convención que AMPLITUD en tu script de ida y
                          # vuelta) [PENDIENTE: ajustar]
                          # sugerencia: correlo primero con un escalón
@@ -82,17 +82,17 @@ AMPLITUD_ESCALON = 100  # µm, tamaño del escalón (semi-amplitud, igual
                          # el settling time puede cambiar si hay
                          # saturación de slew-rate
 
-T_SERVO_US = 1.0        # [MEDIDO, de tu script — E517_diagnostico.py,
+T_SERVO_US = 40.0        # [MEDIDO, de tu script — E517_diagnostico.py,
                           #  SPA 0x0E000200] -- volver a confirmar si
                           #  cambia el hardware
-WTR = 20                 # ciclos de servo por punto de wave table
+WTR = 1                 # ciclos de servo por punto de wave table
                           # → dwell = T_SERVO_US * WTR
 DWELL_US = T_SERVO_US * WTR
 
 N_PRE = 50               # puntos de baseline en POS_INICIAL, antes del
                           # escalón (para tener referencia de ruido de
                           # fondo antes del salto)
-N_POST = 400              # puntos después del escalón, en POS_FINAL
+N_POST = 8000              # puntos después del escalón, en POS_FINAL
                           # (tiene que alcanzar para ver el asentamiento
                           # completo -- si tu tau de asentamiento es
                           # largo, subí este número)
@@ -114,7 +114,7 @@ print(f"[conexión] {pidevice.qIDN().strip()}")
 pidevice.ONL([1, 2, 3], [1, 1, 1])
 pidevice.SVO(['A', 'B'], [True, True])
 
-pidevice.DCO(['A', 'B'], [True, True])
+pidevice.DCO(['A', 'B'], [False, False])
 print(pidevice.qDCO())
 pidevice.VCO(['A', 'B'], [False, False])
 print(pidevice.qVCO())
@@ -331,7 +331,7 @@ axes[1].set_ylabel('error [nm]')
 axes[1].set_xlabel('t − t_escalón [ms]')
 
 plt.tight_layout()
-plt.savefig(RESULTADOS_FIGURAS / f"{nombre_base}.pdf", bbox_inches='tight', dpi=200)
+plt.savefig(RESULTADOS_FIGURAS / f"{nombre_base}_DCOFalse.pdf", bbox_inches='tight', dpi=200)
 plt.show()
 
 print(f"\n[fin] gráfico guardado como {nombre_base}.pdf")
