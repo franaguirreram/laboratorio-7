@@ -220,6 +220,9 @@ with open(DATOS_METADATA / f"{nombre_base}_metadata.txt", 'w') as f:
     f.write(f"T_SERVO_US={T_SERVO_US} WTR={WTR} RTR_VAL={RTR_VAL}\n")
     f.write(f"N_IDA={N_IDA} N_VUELTA={N_VUELTA} N_TOTAL={N_TOTAL}\n")
     f.write(f"SPEEDUPDOWN={SPEEDUPDOWN}\n")
+    # Estado REAL del controlador, no lo que diga el código -- ver
+    # docs/velocidad_ancho_de_banda_y_diseno_de_scans.md §8.3.
+    f.write(f"DCO={dict(pidevice.qDCO())}\n")
     f.write(f"T_ASENTAMIENTO_S={T_ASENTAMIENTO_S}\n")
     f.write(f"n_leer={n_leer} muestras_leidas={len(current)}\n")
     f.write(f"error_max_nm={np.max(np.abs(error))*1000:.3f}\n")

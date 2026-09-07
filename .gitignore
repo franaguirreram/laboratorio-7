@@ -13,3 +13,14 @@ e545-pi-ftdi-gateway/
 # entornos virtuales, si alguna vez se crean dentro del repo
 .venv/
 venv/
+
+# Corridas con el bug de la cola del recorder (2026-09-07): datos
+# inutilizables, se conservan localmente por las dudas pero no se
+# versionan. La explicación del defecto sí se versiona (LEEME.md).
+datos/descartadas/*.csv
+datos/descartadas/*_metadata.txt
+
+# Librería propietaria de Physik Instrumente. NO se versiona: este repo es
+# público y redistribuirla sería un problema de licencia. Se consigue del
+# PI Software Suite. (Este proyecto no la usa: usa el gateway FTDI propio.)
+PI GCS2 dylib/

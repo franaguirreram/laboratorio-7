@@ -283,6 +283,11 @@ with open(DATOS_METADATA / f"{nombre_base}_metadata.txt", 'w') as f:
     f.write(f"pos_inicial={pos_inicial} pos_final={pos_final}\n")
     f.write(f"T_SERVO_US={T_SERVO_US} WTR={WTR} RTR_VAL={RTR_VAL}\n")
     f.write(f"N_PRE={N_PRE} N_POST={N_POST} N_TOTAL={N_TOTAL}\n")
+    # Estado REAL del controlador al momento de la corrida, no lo que diga
+    # el código -- el análisis de asentamiento del 2026-09-02 encontró que
+    # se estaba tocando DCO desde la consola sin quedar registrado en
+    # ningún lado salvo (a mano, a veces) el nombre del PDF de la figura.
+    f.write(f"DCO={dict(pidevice.qDCO())}\n")
     f.write(f"T_ASENTAMIENTO_S={T_ASENTAMIENTO_S}\n")
     f.write(f"n_leer={n_leer} muestras_leidas={len(current)}\n")
     f.write(f"t_escalon_ms={t_escalon_ms:.4f}\n")
