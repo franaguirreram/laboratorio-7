@@ -955,7 +955,15 @@ def verificar_coherencia(cfg, n_puntos, t_servo_s):
 
     # (b) — solo rampa: el tramo recto tiene que superar el transitorio
     if cfg.modo == "rampa":
-        n_recta   = n_puntos / 2 - cfg.speedupdown
+        # [ARREGLADO 2026-09-09] Era `n_puntos/2 - speedupdown`, que cuenta
+        # el suavizado una sola vez. WAV_RAMP lo aplica en LAS DOS puntas de
+        # cada pata: verificado sobre los incrementos de la wave grabada
+        # (datos/raw/E517_rampa_scan_w40_sud*), donde la meseta de dx/punto
+        # va de ~sud a ~n/2-sud. Con sud=40 y n=400 son 120 puntos rectos, no
+        # 160; con sud=80, 40 puntos y no 120. La fórmula vieja declaraba
+        # 192 ms de tramo recto para la corrida sud80, que tiene 64 ms, y por
+        # eso no disparaba el aviso de tramo corto.
+        n_recta   = n_puntos / 2 - 2 * cfg.speedupdown
         t_recta   = n_recta * cfg.wtr * t_servo_s * 1e3
         t_minimo  = T_CONV_MS + 20.0
         if n_recta <= 0:
@@ -1265,6 +1273,17 @@ def corrida(pidevice, cfg, ctx, verbose=True):
         pd.DataFrame({"t_ms": t_ms, **columnas}).to_csv(
             DATOS_RAW / f"{base}.csv", index=False)
 
+        # [ARREGLADO 2026-09-09] Esto estaba al FINAL del try, o sea DESPUÉS
+        # de escribir la metadata -- y como la metadata se arma volcando
+        # `fila`, salía ok=False en el archivo aunque la corrida hubiera ido
+        # perfecta. Las 212 metadata del 2026-09-09 y las 26 del 2026-09-07
+        # quedaron con ese False; el estado real de esas corridas está en
+        # resultados/barridos/*.csv, que se escriben desde memoria. Acá se
+        # marca ok apenas los datos están en disco: de ahí en adelante la
+        # corrida ya sirve, y si algo falla escribiendo metadata o figura el
+        # except lo vuelve a poner en False.
+        fila["ok"] = True
+
         # Metadata: TODO releído del controlador, no lo que dice el código.
         estado = {
             "qIDN": ctx["idn"],
@@ -1310,11 +1329,11 @@ def corrida(pidevice, cfg, ctx, verbose=True):
         if cfg.guardar_figura:
             _figura_corrida(t_ms, columnas, cfg, fila, base)
 
-        fila["ok"] = True
         if verbose:
             print(f"      → {base}  " + _resumen_corto(cfg, fila))
 
     except Exception as exc:                     # noqa: BLE001
+        fila["ok"] = False
         fila["error_msg"] = f"{type(exc).__name__}: {exc}"
         print(f"  [ERROR] {cfg.etiqueta} r{cfg.repeticion}: {fila['error_msg']}")
         traceback.print_exc()
