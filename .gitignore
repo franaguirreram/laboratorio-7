@@ -24,3 +24,6 @@ datos/descartadas/*_metadata.txt
 # público y redistribuirla sería un problema de licencia. Se consigue del
 # PI Software Suite. (Este proyecto no la usa: usa el gateway FTDI propio.)
 PI GCS2 dylib/
+
+# PDF de feedback: material de terceros, no se publica en un repo público.
+Feedback for physicists

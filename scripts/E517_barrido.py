@@ -130,6 +130,16 @@ OPCIONES_DRC = {
 # Registro del parámetro de ciclo de servo (Servo Update Time), en segundos
 SPA_SERVO_UPDATE_TIME = 0x0E000200
 
+# %% -- Constantes MEDIDAS del lazo ---------------------------------------
+# [MEDIDO 2026-09-08 — notebooks/01_escalon_tiempo_de_retardo.ipynb]
+# Sobre 28 corridas de escalón válidas (DCO off, saltos de 0.2 a 100 µm) y
+# 8 de rampa. Las dos vías coinciden dentro del 4.3 %.
+TAU_LAG_MS = 13.1    # tau_lag = ∫(1-y)dt = 1/Kv. El error de rampa vale v·tau.
+T_CONV_MS  = 33.0    # cuándo esa integral llega al 99.5 % de su valor final.
+                      # Es lo que hay que DESCARTAR del arranque de una rampa.
+                      # NO es 3·tau (39 ms, conservador) ni 5.3·tau (68 ms,
+                      # que es lo que pediría un modelo de primer orden).
+
 
 # %% -- Configuración de UNA corrida --------------------------------------
 @dataclass
@@ -197,6 +207,10 @@ class Corrida:
     t_asentamiento_s: float = 0.5   # espera después del MOV inicial
     guardar_figura: bool = False    # una figura por corrida (en un barrido
                                      # largo conviene False y graficar al final)
+    estricto: bool = True        # aborta la corrida si `verificar_coherencia`
+                                  # encuentra un problema BLOQUEANTE. Ponerlo
+                                  # en False solo para reproducir a propósito
+                                  # una configuración vieja y rota.
     notas: str = ""
 
 
@@ -657,7 +671,7 @@ def _cerrar_huecos(mascara, n):
     return m
 
 
-def zonas_rampa(t_ms, target, wtr, rtr, tau_ms=12.1, umbral=0.95):
+def zonas_rampa(t_ms, target, wtr, rtr, t_conv_ms=None, umbral=0.95):
     """Parte una rampa en aceleración / velocidad constante / desaceleración,
     y devuelve además la zona USABLE para escanear.
 
@@ -711,7 +725,13 @@ def zonas_rampa(t_ms, target, wtr, rtr, tau_ms=12.1, umbral=0.95):
     acel = (~constante) & (np.abs(v) > 0.02 * v_ref)
 
     # zona usable: dentro de la IDA, descartando los primeros 3τ
-    n_3tau = int(np.ceil(3 * tau_ms / dt_ms))
+    # Cuánto descartar del arranque. NO es 3·tau: eso sale de suponer que el
+    # lazo es de primer orden, y no lo es [notebooks/01_...ipynb §5]. El
+    # criterio correcto es t_conv, el tiempo en que la integral acumulada del
+    # escalón llega al 99.5 % de su valor final. MEDIDO: 33 ms, contra 39 ms
+    # de 3·tau (conservador) y 68 ms de 5.3·tau (lo que pediría 1er orden).
+    t_conv_ms = T_CONV_MS if t_conv_ms is None else t_conv_ms
+    n_3tau = int(np.ceil(t_conv_ms / dt_ms))
     usable = np.zeros_like(ida)
     idx = np.where(ida)[0]
     if len(idx) > n_3tau:
@@ -733,7 +753,7 @@ def zonas_rampa(t_ms, target, wtr, rtr, tau_ms=12.1, umbral=0.95):
             "v_constante_um_s": v_c,
             "t_constante_ms": float(ida.sum() * dt_ms),
             "t_acel_ms": float(acel.sum() * dt_ms),
-            "t_3tau_necesario_ms": n_3tau * dt_ms,
+            "t_conv_necesario_ms": n_3tau * dt_ms,
             "dx_por_punto_nm": abs(v_c) * (wtr * 40e-6) * 1e3,
         })
 
@@ -789,7 +809,7 @@ def _analisis_rampa(t_ms, target, current, error, t_servo_s, wtr, rtr,
     sl = slice(int(idx[0]), int(idx[-1]) + 1)
     for k in ("frac_usable", "dx_por_punto_nm", "recorrido_usable_um",
               "t_acel_ms", "t_constante_ms", "t_usable_ms",
-              "t_3tau_necesario_ms", "hay_zona_usable"):
+              "t_conv_necesario_ms", "hay_zona_usable"):
         out[k] = z.get(k, np.nan)
 
     # La velocidad NO se saca de la mediana de las diferencias: el target
@@ -907,6 +927,117 @@ def _analisis_quieto(t_ms, serie_um, t_servo_s, rtr):
 
 
 # %% -- UNA corrida -------------------------------------------------------
+def verificar_coherencia(cfg, n_puntos, t_servo_s):
+    """Chequea la configuración ANTES de disparar. Devuelve (bloqueantes, avisos).
+
+    Cada regla de acá salió de corridas que se perdieron por no tenerla.
+    De las 69 corridas de rampa acumuladas hasta el 2026-09-08, 51 quedaron
+    inutilizables por alguna de estas tres cosas — ninguna por física.
+
+        (a) la trayectoria no entra en la ventana del recorder
+        (b) el tramo recto es más corto que el transitorio que se quiere medir
+        (c) WTR != RTR, así que no hay 1 muestra por punto de wave
+
+    Referencia de los números: notebooks/01_escalon_tiempo_de_retardo.ipynb §6.
+    """
+    bloq, avisos = [], []
+    ventana_ticks = N_MAX_TABLA * cfg.rtr           # en ciclos de servo
+    wave_ticks    = n_puntos * cfg.wgc * cfg.wtr
+    ventana_ms    = ventana_ticks * t_servo_s * 1e3
+    wave_ms       = wave_ticks * t_servo_s * 1e3
+
+    # (a) — vale para todos los modos
+    if wave_ticks > ventana_ticks:
+        bloq.append(
+            f"la trayectoria ({wave_ms:.0f} ms) no entra en la ventana del "
+            f"recorder ({ventana_ms:.0f} ms): n_puntos·WGC·WTR = {wave_ticks} "
+            f"> 8192·RTR = {ventana_ticks}. Subir RTR o bajar n_total/WTR.")
+
+    # (b) — solo rampa: el tramo recto tiene que superar el transitorio
+    if cfg.modo == "rampa":
+        n_recta   = n_puntos / 2 - cfg.speedupdown
+        t_recta   = n_recta * cfg.wtr * t_servo_s * 1e3
+        t_minimo  = T_CONV_MS + 20.0
+        if n_recta <= 0:
+            bloq.append(f"speedupdown={cfg.speedupdown} se come el tramo recto "
+                        f"entero (n_total/2 = {n_puntos/2:.0f} puntos).")
+        elif t_recta < t_minimo:
+            bloq.append(
+                f"tramo recto de {t_recta:.0f} ms < t_conv + 20 ms = "
+                f"{t_minimo:.0f} ms: el error de seguimiento todavía está "
+                f"creciendo cuando se acaba la pata, así que e_ss no es e_ss. "
+                f"Subir n_total·WTR, o bajar speedupdown.")
+        elif t_recta < T_CONV_MS + 50.0:
+            avisos.append(f"tramo recto de {t_recta:.0f} ms: usable = "
+                          f"{t_recta - T_CONV_MS:.0f} ms. Corto pero medible.")
+        if cfg.speedupdown and cfg.modo == "rampa":
+            avisos.append("speedupdown>0 acorta el tramo recto sin aportar nada "
+                          "a la identificación: para medir tau va en 0.")
+        if cfg.dco:
+            avisos.append("dco=True mete una excursión lenta que sesga e_ss.")
+
+    # (c) — relojes. Dos cosas distintas, no confundirlas:
+    #   · WTR < RTR  → se pierden puntos comandados entre muestras. Siempre malo.
+    #   · dt grueso  → no se resuelve el transitorio. Malo para identificar.
+    # WTR = RTR (1 muestra por punto de wave) hace falta para un SCAN, donde
+    # cada píxel necesita su posición medida; para identificar tau no, ahí
+    # manda RTR=1.
+    if cfg.wtr < cfg.rtr:
+        bloq.append(
+            f"WTR={cfg.wtr} < RTR={cfg.rtr}: el generador avanza más rápido "
+            f"que el grabador, así que hay puntos comandados que no quedan "
+            f"registrados en ninguna muestra.")
+    dt_ms = cfg.rtr * t_servo_s * 1e3
+    if dt_ms > T_CONV_MS / 10:
+        avisos.append(
+            f"dt de grabación = {dt_ms:.2f} ms: solo "
+            f"{T_CONV_MS/dt_ms:.0f} muestras en todo el transitorio "
+            f"({T_CONV_MS:.0f} ms). Bajar RTR si interesa la forma de la subida.")
+
+    # escalón: la trayectoria tiene que llenar la ventana o la cola miente
+    if cfg.modo == "escalon" and wave_ticks < ventana_ticks * 0.999:
+        bloq.append(
+            f"escalón con la trayectoria ({wave_ms:.0f} ms) más corta que la "
+            f"ventana ({ventana_ms:.0f} ms): al terminar la wave el canal de "
+            f"posición comandada pasa a 0 y el análisis lee ESE salto como si "
+            f"fuera el escalón. Usar el helper escalon(rtr=...).")
+    return bloq, avisos
+
+
+def n_puntos_de(cfg):
+    """Cuántos puntos de wave va a tener esta configuración, sin cargarla."""
+    return cfg.n_pre + cfg.n_post if cfg.modo == "escalon" else cfg.n_total
+
+
+def revisar_lista(configs, t_servo_s, verbose=True):
+    """Verifica TODAS las configuraciones antes de tocar el equipo.
+
+    Sin esto, un barrido de 12 corridas con una constante mal puesta se
+    entera recién después del primer MOV, con la platina ya movida y medio
+    minuto perdido — y si `estricto=False`, ni se entera: guarda 12 archivos
+    inutilizables. Chequear la lista es gratis y es instantáneo.
+    """
+    problemas = [(cfg, *verificar_coherencia(cfg, n_puntos_de(cfg), t_servo_s))
+                 for cfg in configs]
+    con_bloq = [(c, b) for c, b, _ in problemas if b]
+    if verbose:
+        n_avisos = sum(1 for _, _, a in problemas if a)
+        print(f"[pre-vuelo] {len(configs)} corridas: "
+              f"{len(con_bloq)} con bloqueantes, {n_avisos} con avisos")
+        for cfg, _, avisos in problemas:
+            for a in avisos:
+                print(f"   [aviso] {cfg.etiqueta} r{cfg.repeticion}: {a}")
+        for cfg, bloq in con_bloq:
+            for b in bloq:
+                print(f"   [BLOQUEANTE] {cfg.etiqueta} r{cfg.repeticion}: {b}")
+    if con_bloq and any(c.estricto for c, _ in con_bloq):
+        raise ValueError(
+            f"{len(con_bloq)} de {len(configs)} corridas tienen configuración "
+            f"incoherente. No se conecta al equipo. Corregir, o poner "
+            f"estricto=False si es a propósito.")
+    return problemas
+
+
 def corrida(pidevice, cfg, ctx, verbose=True):
     """Ejecuta UNA medición completa y devuelve una fila (dict) de resumen.
 
@@ -1010,6 +1141,21 @@ def corrida(pidevice, cfg, ctx, verbose=True):
                       "escalón: el asentamiento con DCO=True tarda ~140 ms "
                       "[MEDIDO §8.2] — subir RTR si se quiere ver la cola")
 
+        # --- 7b. coherencia, antes de gastar tiempo de equipo ---------
+        # (redundante si se pasó por revisar_lista, pero `corrida()` también
+        # se usa suelta, y acá ya se conoce n_puntos REAL de la wave cargada)
+        bloq, avisos = verificar_coherencia(cfg, n_puntos, t_servo_s)
+        fila["coherencia_ok"] = not bloq
+        fila["coherencia_bloqueantes"] = " | ".join(bloq)
+        fila["coherencia_avisos"] = " | ".join(avisos)
+        for a in avisos:
+            print(f"      [aviso] {a}")
+        for b in bloq:
+            print(f"      [BLOQUEANTE] {b}")
+        if bloq and cfg.estricto:
+            raise ValueError(
+                "configuración incoherente (estricto=True): " + " | ".join(bloq))
+
         # --- 8. disparo ----------------------------------------------
         t_host = time.time()
         pidevice.WGO(cfg.wavegen, 1)
@@ -1073,9 +1219,25 @@ def corrida(pidevice, cfg, ctx, verbose=True):
                   f"{fila['ventana_post_wave_ms']:.0f} ms")
 
         # --- 10. análisis --------------------------------------------
-        tgt = columnas.get("target_um")
-        cur = columnas.get("current_um")
-        err = columnas.get("error_um")
+        # Si dos tablas graban la MISMA opción sobre ejes distintos (p. ej.
+        # posición real de A y de B, que es lo que hace falta para medir
+        # diafonía), los nombres se desambiguaron con el eje más arriba:
+        # "current_um" pasó a ser "current_um_A". Sin este fallback, el
+        # análisis de rampa/escalón no encuentra la columna, se saltea sin
+        # avisar, y la corrida queda sin métricas — el CSV está bien, pero
+        # el resumen sale en NaN.
+        def _col(nombre):
+            if nombre in columnas:
+                return columnas[nombre]
+            propio = f"{nombre}_{cfg.eje}"
+            if propio in columnas:
+                return columnas[propio]
+            candidatos = [v for k, v in columnas.items() if k.startswith(nombre)]
+            return candidatos[0] if candidatos else None
+
+        tgt = _col("target_um")
+        cur = _col("current_um")
+        err = _col("error_um")
         if err is None and (tgt is not None and cur is not None):
             err = cur - tgt
         if err is not None:
@@ -1091,10 +1253,7 @@ def corrida(pidevice, cfg, ctx, verbose=True):
         elif cfg.modo == "quieto":
             # con nombres desambiguados por eje, "current_um" pasa a ser
             # "current_um_A" — buscar por prefijo antes de rendirse
-            serie = cur
-            if serie is None:
-                pos = [v for k, v in columnas.items() if k.startswith("current_um")]
-                serie = pos[0] if pos else next(iter(columnas.values()))
+            serie = cur if cur is not None else next(iter(columnas.values()))
             fila.update(_analisis_quieto(t_ms, serie, t_servo_s, cfg.rtr))
 
         # --- 11. guardar ---------------------------------------------
@@ -1128,6 +1287,18 @@ def corrida(pidevice, cfg, ctx, verbose=True):
             f.write("# --- estado REAL del controlador (releído) ---\n")
             for k, v in estado.items():
                 f.write(f"{k}={v}\n")
+            # Todo lo que hace falta para reconstruir el eje temporal SIN
+            # confiar en la columna t_ms. (Las corridas del 2026-09-01 tienen
+            # t_ms mal escalado por un factor 40/T_SERVO_US: aquel script
+            # etiquetaba el eje con una variable de Python que nunca se le
+            # mandaba al controlador. Acá t_ms sale de qSPA, pero el análisis
+            # igual debería reconstruirlo desde RTR.)
+            f.write("# --- eje temporal (para reconstruir sin usar t_ms) ---\n")
+            f.write(f"rtr={cfg.rtr}\n")
+            f.write(f"t_servo_us_real={ctx['t_servo_us']:.6f}\n")
+            f.write(f"dt_muestra_us={cfg.rtr * ctx['t_servo_us']:.6f}\n")
+            f.write("formula_t_ms=arange(n) * rtr * t_servo_us_real / 1000\n")
+            f.write("t_ms_confiable=True\n")
             f.write("# --- wave cargada (releída con qGWD) ---\n")
             for k, v in info_wave.items():
                 f.write(f"{k}={v}\n")
@@ -1168,13 +1339,16 @@ def _resumen_corto(cfg, fila):
 
 
 # %% -- El barrido: correr una lista de corridas --------------------------
-def correr_barrido(pidevice, ctx, configs, nombre="barrido", pausa_s=0.3):
+def correr_barrido(pidevice, ctx, configs, nombre="barrido", pausa_s=0.3,
+                   revisar=True):
     """Corre una lista de `Corrida` y devuelve un DataFrame con una fila por
     corrida. Guarda ese DataFrame en resultados/barridos/.
 
     Esta es la función que reemplaza al "editar el script y volver a
     correrlo" — un barrido es una lista, no una sesión de edición.
     """
+    if revisar:
+        revisar_lista(configs, ctx["t_servo_s"])
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     filas = []
     print(f"\n{'='*68}\n[barrido: {nombre}] {len(configs)} corridas\n{'='*68}")
