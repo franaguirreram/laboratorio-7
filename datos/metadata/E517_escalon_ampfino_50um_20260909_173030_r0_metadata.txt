@@ -61,7 +61,7 @@ wave_max=125.0
 wave_primero=75.0
 wave_ultimo=125.0
 # --- métricas ---
-ok=False
+ok=True
 timestamp=20260909_173030
 error_msg=
 t_servo_us=39.999984
