@@ -27,3 +27,6 @@ PI GCS2 dylib/
 
 # PDF de feedback: material de terceros, no se publica en un repo público.
 Feedback for physicists
+
+# indice derivado de la metadata (lo regenera la celda 1 del notebook 04)
+datos/indice_rampas.csv
