@@ -27,3 +27,8 @@ PI GCS2 dylib/
 
 # PDF de feedback: material de terceros, no se publica en un repo público.
 Feedback for physicists
+
+# Worktrees y estado local de Claude Code. Viven fisicamente adentro del repo,
+# asi que sin esto git status tiene que caminar una copia entera del proyecto
+# por cada worktree (y son clonables por accidente).
+.claude/
