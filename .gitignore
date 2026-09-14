@@ -43,3 +43,6 @@ posible_montaje.*
 # El paper de Edorna estaba duplicado en la raíz y en docs/referencias/.
 # Queda el de docs/referencias/.
 /Edorna (2025)*.pdf
+
+# indice derivado de la metadata (lo regenera la celda 1 del notebook 04)
+datos/indice_rampas.csv
