@@ -32,3 +32,14 @@ Feedback for physicists
 # asi que sin esto git status tiene que caminar una copia entera del proyecto
 # por cada worktree (y son clonables por accidente).
 .claude/
+
+# Archivos de diseño del montaje (.af de Affinity), fotos y PDF de implementación:
+# ~38 MB de binarios que ningún notebook usa, que no versionan de verdad (nadie
+# hace diff de un .af) y que viajan en cada clon. Se guardan en Drive.
+*.af
+implementacion_*.pdf
+montaje_*.jpg
+posible_montaje.*
+# El paper de Edorna estaba duplicado en la raíz y en docs/referencias/.
+# Queda el de docs/referencias/.
+/Edorna (2025)*.pdf
