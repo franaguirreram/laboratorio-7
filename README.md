@@ -104,3 +104,18 @@ correspondientes.
 - El experimento de estabilización en sí (el objetivo final) todavía no
   está implementado — lo hecho hasta ahora es la infraestructura y la
   caracterización de la dinámica de la platina.
+
+## Cámara IDS y entorno compartido
+
+La cámara se comunica mediante Aravis/USB3 Vision y comparte el entorno
+`~/python-envs/pi` con la platina. Ver [entorno único](docs/entorno_unificado.md),
+[comandos de captura y escala](docs/camara_captura_y_escala.md) y
+[contexto y limpieza](docs/resumen_contexto_y_limpieza.md).
+
+```bash
+~/python-envs/pi/bin/python scripts/capturar_camara.py --listar
+~/python-envs/pi/bin/python scripts/capturar_camara.py --exposicion-us 1000 --mostrar
+```
+
+La prueba previa confirmó comunicación/captura sin óptica. Foco, escala
+y sincronización con la platina siguen pendientes de validación experimental.

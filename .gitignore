@@ -46,3 +46,6 @@ posible_montaje.*
 
 # indice derivado de la metadata (lo regenera la celda 1 del notebook 04)
 datos/indice_rampas.csv
+
+# Adquisiciones de cámara: guardar fuera de Git; incluir solo referencias seleccionadas.
+datos/camara/
