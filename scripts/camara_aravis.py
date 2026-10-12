@@ -5,6 +5,7 @@ Lo usan camara_en_vivo.py y calibrar_escala_camara.py. No mueve la platina.
 Incluye CamaraSimulada para probar el código sin hardware (--simular).
 """
 import time
+import warnings
 
 import numpy as np
 
@@ -184,29 +185,72 @@ def a_8bit(imagen, formato):
     return (imagen >> (BITS[formato] - 8)).astype(np.uint8)
 
 
-def localizar_punto(imagen, formato, radio=40, fraccion=0.5):
-    """Centroide (x, y) en píxeles del punto más brillante, o None.
+def _gaussiana2d(grid, amplitud, x0, y0, sigma, offset):
+    """Gaussiana 2D, igual a takyaq.stabilizer._gaussian2D.
 
-    Método (elección mía, sin validar con datos reales): suavizo para ubicar el
-    máximo, tomo una ventana de ±radio px, resto la mediana de la imagen como
-    fondo y pondero por lo que supera `fraccion` del pico.
+    sigma es el desvío estándar (a = 1/(2 sigma^2)); el docstring de takyaq
+    dice "FWHM" pero la fórmula es de sigma.
     """
+    x, y = grid
+    a = 1.0 / (2 * sigma ** 2)
+    return (offset + amplitud * np.exp(-(a * (x - x0) ** 2 + a * (y - y0) ** 2))).ravel()
+
+
+def ajuste_gaussiano(datos, x_max, y_max, sigma):
+    """Ajusta una gaussiana a `datos`; devuelve (x, y, sigma) en píxeles DENTRO del recorte.
+
+    Igual a takyaq.stabilizer._gaussian_fit: sin restar fondo, sobre los valores
+    crudos, con curve_fit y p0 = (max-min, x_max, y_max, sigma, min).
+    Convención de takyaq: x es el PRIMER índice del array (fila) e y el segundo
+    (columna), con meshgrid indexing="ij". Si el ajuste falla devuelve nan.
+    """
+    from scipy.optimize import curve_fit
+    try:
+        grid = np.meshgrid(np.arange(datos.shape[0]), np.arange(datos.shape[1]), indexing="ij")
+        v_min, v_max = datos.min(), datos.max()
+        p0 = (v_max - v_min, x_max, y_max, sigma, v_min)
+        with warnings.catch_warnings():  # una ROI sin punto avisa en cada cuadro; solo silencia el aviso
+            warnings.simplefilter("ignore")
+            popt, _ = curve_fit(_gaussiana2d, grid, datos.ravel(), p0=p0)
+    except Exception:
+        return np.nan, np.nan, np.nan
+    return popt[1], popt[2], popt[3]
+
+
+def roi_en_maximo(imagen, radio=30):
+    """ROI (f0, f1, c0, c1) de lado 2*radio centrada en el máximo de la imagen suavizada."""
     from scipy.ndimage import gaussian_filter
-    img = imagen.astype(float)
-    iy, ix = np.unravel_index(np.argmax(gaussian_filter(img, 3)), img.shape)
-    y0, y1 = max(iy - radio, 0), min(iy + radio + 1, img.shape[0])
-    x0, x1 = max(ix - radio, 0), min(ix + radio + 1, img.shape[1])
-    ventana = img[y0:y1, x0:x1]
-    fondo = np.median(img)
-    pico = ventana.max() - fondo
-    if pico <= 0:
+    f, c = np.unravel_index(np.argmax(gaussian_filter(imagen.astype(float), 3)), imagen.shape)
+    return (max(f - radio, 0), min(f + radio + 1, imagen.shape[0]),
+            max(c - radio, 0), min(c + radio + 1, imagen.shape[1]))
+
+
+def localizar_punto(imagen, formato, roi=None, previos=None, radio=30):
+    """Posición del punto por ajuste gaussiano en una ROI, como en takyaq.
+
+    roi: (f0, f1, c0, c1) en píxeles del array; si es None se centra en el máximo.
+    previos: (x, y, sigma) del cuadro anterior dentro de la ROI. takyaq lo reutiliza
+    como valor inicial del ajuste siguiente; si es None se inicia como
+    takyaq._initialize_last_params (máximo de la ROI, sigma = lado/3).
+    Devuelve dict con x (columna) e y (fila) en la imagen completa, sigma [px],
+    pico, saturado, roi y params (para pasar como `previos`); None si el ajuste falla
+    o es absurdo (centro fuera de la ROI o sigma mayor que la ROI).
+    """
+    roi = roi or roi_en_maximo(imagen, radio)
+    f0, f1, c0, c1 = roi
+    recorte = imagen[f0:f1, c0:c1]
+    if previos is None:
+        pos = np.unravel_index(np.argmax(recorte), recorte.shape)
+        previos = (float(pos[0]), float(pos[1]), recorte.shape[0] / 3)
+    x, y, s = ajuste_gaussiano(recorte, *previos)
+    # control propio (takyaq no lo hace): centro fuera de la ROI o sigma mayor que la ROI = no hay punto
+    if (np.isnan(x) or not (0 <= x < recorte.shape[0] and 0 <= y < recorte.shape[1])
+            or abs(s) > max(recorte.shape)):
         return None
-    peso = np.clip(ventana - fondo - fraccion * pico, 0, None)
-    yy, xx = np.mgrid[y0:y1, x0:x1]
-    s = peso.sum()
-    tope = 2 ** BITS[formato] - 1
-    return {"x": float((peso * xx).sum() / s), "y": float((peso * yy).sum() / s),
-            "pico": float(ventana.max()), "saturado": bool(ventana.max() >= tope)}
+    return {"x": float(c0 + y), "y": float(f0 + x),  # x de la imagen = columna; y = fila
+            "sigma": float(abs(s)), "pico": float(recorte.max()),
+            "saturado": bool(recorte.max() >= 2 ** BITS[formato] - 1),
+            "roi": roi, "params": (float(x), float(y), float(s))}
 
 
 def desplazamiento_correlacion(ref, img):
