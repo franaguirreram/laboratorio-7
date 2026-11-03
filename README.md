@@ -20,7 +20,7 @@ el experimento de estabilización propiamente dicho.
 - Controlador: PI E-517 (serial `0111176619`), conectado por USB.
 - Eje usado en las pruebas: A (rango físico medido: 0 a 200 µm).
 - Reloj de servo interno: 40 µs (25 kHz) — medido, no de datasheet.
-- Software: macOS arm64, Python 3.14 en `~/python-envs/pi`, `pipython`
+- Software: macOS arm64, Python 3.12 en `~/python-envs/pi`, `pipython`
   (librería oficial de PI) + un gateway de transporte propio (ver
   `e545-pi-ftdi-gateway/`) que reemplaza la DLL nativa que PI no
   distribuye para esta plataforma.
@@ -90,7 +90,7 @@ pip install -e e545-pi-ftdi-gateway/
 ```
 
 Después, cualquier script de `scripts/` se corre directo (apuntando el
-intérprete de Python a `~/python-envs/pi/bin/python3.14` si se usa
+intérprete de Python a `~/python-envs/pi/bin/python3.12` si se usa
 Spyder) — cada uno guarda sus datos y su figura solo, en las carpetas
 correspondientes.
 

@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Óptica f2–f3–f4</title>
+<style>
+:root{--bg:#fff;--fg:#1c1f24;--mut:#5b6573;--card:#f4f6f9;--line:#d5dae1;--acc:#1f6feb;--ok:#1a7f37;--warn:#b35900;--bad:#c62828;--ray0:#1f6feb;--ray1:#e8590c;--lens:#2b2f36;--canvas:#fbfcfe}
+@media (prefers-color-scheme:dark){:root{--bg:#14171c;--fg:#e6e9ee;--mut:#9aa5b4;--card:#1d222a;--line:#2f3641;--acc:#5aa2ff;--ok:#4cc26b;--warn:#f0a050;--bad:#ff7b72;--ray0:#5aa2ff;--ray1:#ff9a52;--lens:#c9d1dc;--canvas:#10131a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+main{max-width:980px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:22px;margin:0 0 4px}
+h2{font-size:17px;margin:32px 0 10px;padding-top:8px;border-top:1px solid var(--line)}
+p{margin:6px 0}
+.sub{color:var(--mut);margin-bottom:16px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:12px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.card .k{font-size:12px;color:var(--mut)}
+.card .v{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
+.card .n{font-size:12px;color:var(--mut)}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:10px 0}
+.warn{border-left:4px solid var(--warn)}
+canvas{width:100%;height:380px;display:block;background:var(--canvas);border:1px solid var(--line);border-radius:10px}
+.ctl{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:8px 18px;margin:12px 0}
+.row{display:grid;grid-template-columns:92px 1fr 66px;align-items:center;gap:8px}
+.row label{font-size:13px;color:var(--mut)}
+.row input[type=number]{width:66px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:3px 5px;font:inherit}
+.row input[type=range]{width:100%}
+select,button{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:5px 9px;font:inherit;cursor:pointer}
+.out{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:4px 18px;font-size:13.5px;margin:10px 0}
+.out div span{font-weight:600;font-variant-numeric:tabular-nums}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.wn{color:var(--warn)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
+th,td{border-bottom:1px solid var(--line);padding:4px 8px;text-align:right}
+th:first-child,td:first-child{text-align:left}
+code,.f{font-family:ui-monospace,Menlo,monospace;font-size:13.5px;background:var(--card);padding:1px 5px;border-radius:4px}
+.legend span{display:inline-block;margin-right:14px;font-size:13px}
+.dot{display:inline-block;width:18px;height:3px;vertical-align:middle;margin-right:5px}
+ul{margin:6px 0;padding-left:20px}
+</style>
+</head>
+<body>
+<main>
+<h1>Cadena óptica BS → cámara: f2, f3, f4</h1>
+<p class="sub">Rama de detección del microscopio de campo amplio. Cámara IDS U3-3060CP-M (Sony IMX174, 5,86 µm/px, 1936×1216).</p>
+
+<h2 style="border:0;margin-top:8px">1 · Resultado</h2>
+<div class="cards" id="cards"></div>
+<div class="box warn" id="asumo"></div>
+
+<h2>2 · Esquema y simulador (óptica paraxial, lentes finas)</h2>
+<div class="legend">
+  <span><i class="dot" style="background:var(--ray0)"></i>punto en el eje</span>
+  <span><i class="dot" style="background:var(--ray1)"></i>punto en el borde del campo (media altura del sensor)</span>
+</div>
+<canvas id="cv"></canvas>
+<p style="font-size:12.5px;color:var(--mut)" id="scalenote"></p>
+
+<div class="ctl">
+  <div>
+    <div class="row"><label>Objetivo</label>
+      <select id="preset" style="grid-column:2/4">
+        <option value="n100">Nikon 100× NA 1,4 (f_tubo 200)</option>
+        <option value="o150" selected>Olympus 150× NA 1,45 (f_tubo 180) — verificar</option>
+        <option value="custom">Personalizado</option>
+      </select></div>
+    <div class="row"><label>f_obj [mm]</label><input type="range" id="fobj_r" min="1" max="4" step="0.05"><input type="number" id="fobj" step="0.05"></div>
+    <div class="row"><label>NA</label><input type="range" id="NA_r" min="0.5" max="1.5" step="0.01"><input type="number" id="NA" step="0.01"></div>
+    <div class="row"><label>λ [nm]</label><input type="range" id="lam_r" min="400" max="800" step="1"><input type="number" id="lam" step="1"></div>
+  </div>
+  <div>
+    <div class="row"><label>f2 [mm]</label><input type="range" id="f2_r" min="50" max="400" step="5"><input type="number" id="f2"></div>
+    <div class="row"><label>f3 [mm]</label><input type="range" id="f3_r" min="20" max="300" step="5"><input type="number" id="f3"></div>
+    <div class="row"><label>f4 [mm]</label><input type="range" id="f4_r" min="20" max="300" step="5"><input type="number" id="f4"></div>
+    <div class="row"><label>obj → f2</label><input type="range" id="s0_r" min="20" max="250" step="5"><input type="number" id="s0"></div>
+  </div>
+  <div>
+    <label style="font-size:13px"><input type="checkbox" id="auto"> distancias ideales automáticas (desmarcar para desajustar)</label>
+    <div class="row"><label>f2 → f3</label><input type="range" id="s23_r" min="50" max="800" step="1"><input type="number" id="s23"></div>
+    <div class="row"><label>f3 → f4</label><input type="range" id="s34_r" min="50" max="800" step="1"><input type="number" id="s34"></div>
+    <div class="row"><label>f4 → cámara</label><input type="range" id="s4c_r" min="20" max="400" step="1"><input type="number" id="s4c"></div>
+  </div>
+</div>
+<div class="out" id="out"></div>
+
+<h2>3 · Cómo se elige el mejor telescopio (f3, f4)</h2>
+<ol style="padding-left:20px;margin:6px 0">
+  <li><b>Fijar M total por muestreo</b>, no por gusto: la PSF mide FWHM ≈ 0,51·λ/NA (≈ 194 nm a 532 nm, NA 1,4). Queremos ~3–5 px por FWHM (p ≈ FWHM/4). Menos: submuestreás; más: la luz se reparte en más píxeles (más ruido de lectura) y el campo se achica. Eso da M<sub>tot</sub> = 5,86 µm / p.</li>
+  <li><b>Repartir M</b>: M<sub>tot</sub> = (f2/f_obj)·(f4/f3). f2 se deja en la f de tubo del fabricante (da M del objetivo exacto); el telescopio pone solo el factor que falta, M<sub>2</sub> = f4/f3.</li>
+  <li><b>Restricción de largo</b>: f2→cámara = f2 + 2·f3 + 2·f4 ≤ el espacio disponible.</li>
+  <li><b>Desempate</b>: a igual f4/f3 conviene el f3 más largo que entre (menor ángulo de campo, más lugar para pinhole, filtros y espejos); se paga en largo y sensibilidad a la inclinación. Usar dobletes acromáticos (no plano-convexas sueltas) con la cara más curva hacia el lado colimado.</li>
+</ol>
+<div class="box">
+  <div class="row" style="grid-template-columns:180px 80px 180px 80px;gap:6px"><label>px por FWHM objetivo</label><input type="number" id="npx" step="0.5" min="2" max="8"><label>largo máx. f2→cámara [mm]</label><input type="number" id="Lmax" step="10"></div>
+  <table id="cand"></table>
+  <p style="font-size:12.5px;color:var(--mut)">Focales de la lista de dobletes acromáticos estándar de 1": 30, 40, 50, 60, 75, 80, 100, 125, 150, 200, 250, 300, 400, 500 mm. Se muestran solo pares con M dentro de ±6 % del objetivo, ordenados por f3 decreciente. Click en una fila para cargarla en el simulador.</p>
+</div>
+
+<h2>4 · Teoría mínima de la magnificación</h2>
+<div class="box">
+<p><b>Lente fina.</b> <span class="f">1/s + 1/s' = 1/f</span>, aumento lateral <span class="f">M = −s'/s</span>. Un objeto en el plano focal (s = f) da s' → ∞: haz colimado. Un haz colimado entra y la imagen aparece justo en el plano focal.</p>
+<p><b>Objetivo corregido a infinito + lente de tubo f2.</b> Un punto de altura <span class="f">y</span> en el plano focal del objetivo sale colimado con ángulo <span class="f">θ = y/f_obj</span>. La lente f2 lo enfoca a altura <span class="f">y' = f2·θ = (f2/f_obj)·y</span>. Por eso <span class="f">M<sub>1</sub> = f2/f_obj</span> (100× = 200 mm / 2 mm). Entre el objetivo y f2 el haz es colimado: el BS y filtros ahí no cambian M ni el foco.</p>
+<p><b>Telescopio (relé) f3→f4.</b> La imagen intermedia (en el foco de f2) se pone en el foco anterior de f3: sale colimada; f4 la vuelve a enfocar a distancia f4. Altura: <span class="f">y'' = (f4/f3)·y'</span>, así que <span class="f">M<sub>2</sub> = f4/f3</span>. Separación f3 + f4 (afocal). Aumento total <span class="f">M = M<sub>1</sub>·M<sub>2</sub></span> (dos inversiones: imagen derecha). El pinhole confocal va en la imagen intermedia, entre f2 y f3.</p>
+<p><b>Qué significa en la cámara.</b> Escala <span class="f">p = 5,86 µm / M</span>; campo <span class="f">N·p</span>; PSF en el sensor = M·FWHM. La apertura numérica se reduce <span class="f">NA<sub>cam</sub> = NA/M</span> (~0,011): los conos son casi paralelos, por eso la cámara tolera ±mm de desenfoque (±λ/2NA<sub>cam</sub>²), mientras en la muestra el mismo desenfoque equivale a ~M² veces menos (aumento axial ≈ M²): una variación de z de unos nm en la muestra se amplifica por ~10⁴.</p>
+<p><b>Cono de luz.</b> En el simulador: antes de f2 el haz es un cilindro de diámetro 2·NA·f_obj (≈ 5,6 mm); f2 lo converge a la imagen intermedia con semiángulo NA/M<sub>1</sub>; f3 lo vuelve a cilindro de diámetro 2·f3·NA/M<sub>1</sub> (≈ 2,8 mm con f3 = 100); f4 lo converge en el sensor con semiángulo NA/M. Un punto fuera del eje solo inclina el cilindro.</p>
+</div>
+</main>
+
+<script>
+const PIX=5.86e-3, NX=1936, NY=1216;           // mm
+const STD=[30,40,50,60,75,80,100,125,150,200,250,300,400,500];
+const PRE={n100:{fobj:2.0,NA:1.4,f2:200},o150:{fobj:1.2,NA:1.45,f2:180}};
+const S={preset:'o150',fobj:1.2,NA:1.45,lam:532,f2:180,f3:100,f4:80,s0:60,auto:true,s23:280,s34:180,s4c:80,npx:4,Lmax:700};
+const $=id=>document.getElementById(id);
+const NUM=['fobj','NA','lam','f2','f3','f4','s0','s23','s34','s4c','npx','Lmax'];
+
+function trace(y0,h){
+  const X2=S.s0, X3=X2+S.s23, X4=X3+S.s34, XC=X4+S.s4c;
+  const els=[[X2,S.f2],[X3,S.f3],[X4,S.f4]];
+  let y=h,u=-y0/S.fobj,x=0; const pts=[[0,y]], atLens=[];
+  for(const [xe,f] of els){ y+=u*(xe-x); x=xe; pts.push([x,y]); atLens.push(Math.abs(y)); u-=y/f; }
+  const y4=y,u4=u; y+=u*(XC-x); pts.push([XC,y]);
+  return {pts,yc:y,y4,u4,atLens,XC};
+}
+function ideal(){ S.s23=S.f2+S.f3; S.s34=S.f3+S.f4; S.s4c=S.f4; }
+
+function metrics(){
+  const R=S.NA*S.fobj, yf=NY*PIX/2/((S.f2/S.fobj)*(S.f4/S.f3));  // semialtura de campo en la muestra [mm]
+  const chief=trace(0.01,0), Meff=Math.abs(chief.yc/0.01);
+  const marg=trace(0,R), tImg=-marg.y4/marg.u4, defoc=tImg-S.s4c;
+  const conf=2*Math.abs(marg.yc)*1000;                              // µm
+  const ap=[0,1,2].map(i=>Math.max(...[0,yf].flatMap(y0=>[-R,0,R].map(h=>trace(y0,h).atLens[i]))));
+  const M1=S.f2/S.fobj, M2=S.f4/S.f3, Mn=M1*M2;
+  const fw=0.51*S.lam/S.NA, p=PIX*1e6/Meff, Ncam=S.NA/Meff;
+  return {R,yf,Meff,Mn,M1,M2,defoc,conf,ap,fw,p,pxfw:fw/p,
+    fovx:NX*p/1000,fovy:NY*p/1000,L:S.s23+S.s34+S.s4c,
+    ph:1.22*S.lam/1000/S.NA*M1,dof:S.lam*1e-6/(2*Ncam*Ncam),
+    Dcol:2*S.f3*S.NA/M1};
+}
+const f1=(v,n=1)=>v.toLocaleString('es-AR',{minimumFractionDigits:n,maximumFractionDigits:n});
+
+function drawRays(m){
+  const cv=$('cv'), dpr=window.devicePixelRatio||1, W=cv.clientWidth, H=cv.clientHeight;
+  cv.width=W*dpr; cv.height=H*dpr; const c=cv.getContext('2d'); c.scale(dpr,dpr);
+  const css=getComputedStyle(document.documentElement), col=n=>css.getPropertyValue(n).trim();
+  c.clearRect(0,0,W,H);
+  const X2=S.s0, X3=X2+S.s23, X4=X3+S.s34, XC=X4+S.s4c;
+  const ml=24,mr=24, x0=-0.02*XC, x1=XC*1.02, sx=(W-ml-mr)/(x1-x0), px=x=>ml+(x-x0)*sx;
+  const sets=[[0,col('--ray0')],[m.yf,col('--ray1')]].map(([y0,cl])=>({cl,rays:[-m.R,0,m.R].map(h=>trace(y0,h))}));
+  let ymax=1e-9; sets.forEach(s=>s.rays.forEach(r=>r.pts.forEach(p=>ymax=Math.max(ymax,Math.abs(p[1])))));
+  const cy=H*0.46, sy=(H*0.46-34)/ymax, py=y=>cy-y*sy;
+  c.lineWidth=1; c.strokeStyle=col('--line'); c.beginPath(); c.moveTo(ml,cy); c.lineTo(W-mr,cy); c.stroke();
+  // rayos
+  sets.forEach(s=>s.rays.forEach((r,i)=>{ c.strokeStyle=s.cl; c.lineWidth=i==1?1.6:1; c.globalAlpha=i==1?0.95:0.65; c.beginPath();
+    r.pts.forEach((p,k)=>k?c.lineTo(px(p[0]),py(p[1])):c.moveTo(px(p[0]),py(p[1]))); c.stroke(); }));
+  c.globalAlpha=1;
+  // elementos
+  c.fillStyle=col('--lens'); c.strokeStyle=col('--lens'); c.font='12px -apple-system,sans-serif'; c.textAlign='center';
+  const lh=H*0.4;
+  [[X2,'f2',S.f2],[X3,'f3',S.f3],[X4,'f4',S.f4]].forEach(([x,n,f])=>{
+    const X=px(x); c.lineWidth=2; c.beginPath(); c.moveTo(X,cy-lh); c.lineTo(X,cy+lh); c.stroke();
+    [-1,1].forEach(d=>{ c.beginPath(); c.moveTo(X,cy+d*lh); c.lineTo(X-5,cy+d*(lh-9)); c.lineTo(X+5,cy+d*(lh-9)); c.closePath(); c.fill(); });
+    c.fillText(n+' = '+f1(f,0)+' mm',X,cy-lh-6);
+  });
+  const Xo=px(0); c.fillRect(Xo-7,cy-lh*0.55,7,lh*1.1); c.fillText('objetivo',Xo+16,cy-lh*0.55-6);
+  const Xb=px(S.s0*0.45); c.save(); c.translate(Xb,cy); c.rotate(Math.PI/4); c.strokeRect(-12,-12,24,24); c.restore(); c.fillText('BS',Xb,cy+30);
+  // plano imagen intermedia
+  const Xi=px(X2+S.f2); c.setLineDash([4,4]); c.lineWidth=1; c.beginPath(); c.moveTo(Xi,cy-lh*0.8); c.lineTo(Xi,cy+lh*0.8); c.stroke(); c.setLineDash([]);
+  c.fillText('imagen interm. / pinhole',Xi,cy+lh*0.8+14);
+  // cámara
+  const Xc=px(XC); c.lineWidth=3; c.strokeStyle=col('--acc'); c.beginPath(); c.moveTo(Xc,cy-lh*0.5); c.lineTo(Xc,cy+lh*0.5); c.stroke();
+  c.fillStyle=col('--acc'); c.fillText('cámara',Xc-8,cy+lh*0.5+14);
+  // cotas
+  c.strokeStyle=col('--mut'); c.fillStyle=col('--mut'); c.lineWidth=1;
+  const yd=H-18;
+  [[X2,X3,S.s23],[X3,X4,S.s34],[X4,XC,S.s4c]].forEach(([a,b,d])=>{
+    c.beginPath(); c.moveTo(px(a),yd); c.lineTo(px(b),yd); c.moveTo(px(a),yd-4); c.lineTo(px(a),yd+4); c.moveTo(px(b),yd-4); c.lineTo(px(b),yd+4); c.stroke();
+    c.fillText(f1(d,0)+' mm',(px(a)+px(b))/2,yd-6);
+  });
+  $('scalenote').textContent='Escala horizontal real (mm). Escala vertical exagerada ×'+f1(sy/sx,0)+' para que se vean los conos.';
+}
+
+function render(){
+  if(S.auto) ideal();
+  const m=metrics();
+  NUM.forEach(k=>{ const e=$(k); if(document.activeElement!==e) e.value=S[k]; const r=$(k+'_r'); if(r) r.value=S[k]; });
+  ['s23','s34','s4c'].forEach(k=>{ $(k).disabled=$(k+'_r').disabled=S.auto; });
+  $('auto').checked=S.auto;
+  const f2n=`f2 = ${f1(S.f2,0)} mm`;
+  $('cards').innerHTML=[
+    ['f2 (lente de tubo)',f1(S.f2,0)+' mm','M₁ = '+f1(m.M1,0)+'×'],
+    ['f3 (inicio telescopio)',f1(S.f3,0)+' mm','colima la imagen interm.'],
+    ['f4 (final telescopio)',f1(S.f4,0)+' mm','M₂ = f4/f3 = '+f1(m.M2,2)],
+    ['M total',f1(m.Meff,0)+'×','escala '+f1(m.p,1)+' nm/px'],
+    ['Campo',f1(m.fovx,0)+' × '+f1(m.fovy,0)+' µm','sensor completo'],
+    ['Largo f2→cámara',f1(m.L,0)+' mm',m.L<=S.Lmax?'dentro de '+S.Lmax:'¡excede '+S.Lmax+'!'],
+  ].map(([k,v,n])=>`<div class="card"><div class="k">${k}</div><div class="v">${v}</div><div class="n">${n}</div></div>`).join('');
+  $('asumo').innerHTML='<b>Supuestos a confirmar</b> (cambian el resultado): (1) objetivo: Olympus 150× (¿NA 1,45? verificar grabado), f de tubo Olympus 180 mm → f_obj = 1,2 mm; (2) λ del láser (acá '+S.lam+' nm); (3) f1 solo ilumina (confirmado): entre objetivo y f2 el haz es colimado; (4) ~750 mm desde el BS hasta la cámara (se reserva ~50 mm para BS→f2).';
+  const cls=(ok,t,w)=>`<span class="${ok?'ok':w?'wn':'bad'}">${t}</span>`;
+  const apl=['f2','f3','f4'].map((n,i)=>`${n} ${cls(m.ap[i]<12,'Ø'+f1(2*m.ap[i],1),m.ap[i]<12.7)}`).join(' · ');
+  $('out').innerHTML=[
+    `Aumento M = <span>${f1(m.Meff,1)}×</span> (nominal ${f1(m.Mn,1)}×)`,
+    `Escala = <span>${f1(m.p,1)} nm/px</span>`,
+    `FWHM de la PSF ≈ <span>${f1(m.fw,0)} nm</span> → ${cls(m.pxfw>=3&&m.pxfw<=5.5,f1(m.pxfw,1)+' px/FWHM',m.pxfw>=2.3)} (ideal 3–5)`,
+    `Imagen final vs cámara: ${cls(Math.abs(m.defoc)<0.5*m.dof,'δ = '+f1(m.defoc,1)+' mm',Math.abs(m.defoc)<m.dof)} (tolerancia ±${f1(m.dof,1)} mm)`,
+    `Círculo de confusión en cámara: <span>${f1(m.conf,1)} µm</span> (${f1(m.conf/5.86,1)} px)`,
+    `Diámetro de haz en lentes (1" = 25,4): ${apl}`,
+    `Haz colimado entre f3 y f4: <span>Ø ${f1(m.Dcol,1)} mm</span>`,
+    `Pinhole 1 AU en imagen interm.: <span>${f1(m.ph,0)} µm</span>`,
+  ].map(t=>`<div>${t}</div>`).join('');
+  drawRays(m);
+  candidates();
+}
+
+function candidates(){
+  const fw=0.51*S.lam/S.NA, Mt=PIX*1e6/(fw/S.npx), M1=S.f2/S.fobj, rows=[];
+  for(const a of STD) for(const b of STD){ const L=S.f2+2*a+2*b, M=M1*b/a;
+    if(L<=S.Lmax && Math.abs(Math.log(M/Mt))<=0.06) rows.push({a,b,M,L,pf:fw/(PIX*1e6/M)}); }
+  rows.sort((x,y)=>y.a-x.a||Math.abs(Math.log(x.M/Mt))-Math.abs(Math.log(y.M/Mt)));
+  const sh=rows.slice(0,6);
+  $('cand').innerHTML=`<tr><th>M objetivo ≈ ${f1(Mt,0)}×</th><th>f3</th><th>f4</th><th>M total</th><th>nm/px</th><th>px/FWHM</th><th>largo f2→cám.</th></tr>`+
+    (sh.length?sh.map((r,i)=>`<tr data-a="${r.a}" data-b="${r.b}" style="cursor:pointer"><td>${i==0?'★ sugerida':''}</td><td>${r.a}</td><td>${r.b}</td><td>${f1(r.M,0)}×</td><td>${f1(PIX*1e6/r.M,1)}</td><td>${f1(r.pf,1)}</td><td>${r.L} mm</td></tr>`).join(''):'<tr><td colspan="7">Sin pares estándar dentro de ±6 % con ese largo. Con f2 = f_tubo ya podés estar cerca del M buscado (telescopio 1:1 o sin telescopio).</td></tr>');
+  $('cand').querySelectorAll('tr[data-a]').forEach(tr=>tr.onclick=()=>{ S.f3=+tr.dataset.a; S.f4=+tr.dataset.b; render(); });
+}
+
+// eventos
+NUM.forEach(k=>{
+  $(k).addEventListener('input',e=>{ const v=parseFloat(e.target.value); if(isFinite(v)&&v>0){ S[k]=v; if(['fobj','NA'].includes(k)){S.preset='custom';$('preset').value='custom';} render(); }});
+  const r=$(k+'_r'); if(r) r.addEventListener('input',e=>{ S[k]=parseFloat(e.target.value); if(['fobj','NA'].includes(k)){S.preset='custom';$('preset').value='custom';} render(); });
+});
+$('auto').onchange=e=>{ S.auto=e.target.checked; render(); };
+$('preset').onchange=e=>{ const p=PRE[e.target.value]; if(p){ Object.assign(S,p); } S.preset=e.target.value; render(); };
+window.addEventListener('resize',()=>drawRays(metrics()));
+render();
+</script>
+</body>
+</html>

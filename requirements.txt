@@ -1,10 +1,12 @@
-# PyGObject/Aravis y libusb: instalar con Homebrew; ver docs/entorno_unificado.md
-numpy
-pandas
-scipy
-matplotlib
+# Aravis/libusb y sus typelibs se instalan con Homebrew; ver docs/entorno_unificado.md
+numpy>=1.26.4,<2
+pandas>=2.2,<3
+scipy>=1.13.1,<2
+matplotlib>=3.8,<3.10
 pillow
 pipython
+PyGObject>=3.58,<3.59
 spyder-kernels>=3.1,<3.2
 ipykernel
 pi-ftdi-gateway @ git+https://github.com/franaguirreram/e545-pi-ftdi-gateway.git@b70382d43a47e88e66de21205e35dce4fe3b51da
+takyaq @ git+https://github.com/Stefani-Lab/takyaq.git@2ced935d24e65a343ec4d660a4f65bf17fb5cb0e

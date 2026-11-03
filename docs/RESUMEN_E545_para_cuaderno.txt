@@ -95,4 +95,4 @@ ARCHIVOS RELEVANTES (en la Mac)
 - Carpeta preparada para subir a GitHub: Desktop/LABORATORIO 7/e545-pi-ftdi-gateway/
   - Contiene el driver, sus tests, documentación técnica completa, y una copia de los scripts de laboratorio — lista para inicializar como repositorio, todavía no publicada.
 
-- Entorno de Python usado: ~/python-envs/pi (Python 3.14, específico para este trabajo, con todas las librerías necesarias ya instaladas).
+- Entorno de Python usado: ~/python-envs/pi (Python 3.12, específico para este trabajo, con todas las librerías necesarias ya instaladas).

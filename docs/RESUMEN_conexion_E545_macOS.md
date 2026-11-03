@@ -2,7 +2,7 @@
 
 Fecha: 2026-08-26. Hardware: platina piezoeléctrica PI E-545 (electrónica
 de interfaz E-517), número de serie GCS2 `0111176619`. Máquina: MacBook Air
-arm64, macOS. Entorno Python: venv en `~/python-envs/pi` (Python 3.14 arm64).
+arm64, macOS. Entorno Python: venv en `~/python-envs/pi` (Python 3.12 arm64).
 
 Este documento es both (a) insumo para el cuaderno de laboratorio y (b)
 contexto autocontenido para retomar esta conversación con otro chat de
@@ -41,7 +41,7 @@ archivo nunca existió en la máquina.
   momento de ejecutarlo (comportamiento de fallback de
   `gcsdll.py::get_gcstranslator_dir()`).
 - `pipython` sí estaba instalado, pero en un venv que no era obvio a
-  primera vista: `~/python-envs/pi` (Python 3.14, no 3.12 como se creía
+  primera vista: `~/python-envs/pi` (Python 3.12, no otra versión como se creía
   inicialmente).
 - De la API de `pipython`: `ConnectTCPIP`/`ConnectRS232` son Python puro
   (usan `socket`/`pyserial`, sin librería nativa). Solo `ConnectUSB` (y
@@ -142,7 +142,7 @@ la platina (-5.592 µm → 100.08 µm, confirmado por `qPOS`/`qVOL`):
 - La versión vieja de un solo archivo quedó respaldada (no borrada) en
   `~/PIPython/pi_ftdi_gateway_v1_OBSOLETO.py.bak`.
 - Para correr esto en Spyder: apuntar **Preferences → Python Interpreter**
-  a `~/python-envs/pi/bin/python3.14` (Spyder standalone trae su propio
+  a `~/python-envs/pi/bin/python3.12` (Spyder standalone trae su propio
   entorno interno para la IDE, que no tiene `pipython`/`pyftdi` instalados).
 
 ## 6. Pendiente / próximos pasos

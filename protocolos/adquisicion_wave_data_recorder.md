@@ -92,7 +92,7 @@ al siguiente.
    list_devices()
    ```
 3. En Spyder, confirmar que el intérprete de Python apunta a
-   `~/python-envs/pi/bin/python3.14` (Preferences → Python Interpreter).
+   `~/python-envs/pi/bin/python3.12` (Preferences → Python Interpreter).
 
 ## 1. Diagnóstico (una vez por sesión, o si algo no anda)
 
